@@ -1,0 +1,25 @@
+[project]
+name = "sr-bot2"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic-settings>=2.16.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Keep ruff's default rules and add: I = import order, UP = modern Python syntax, B = common bugs
+extend-select = ["I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project is not installed as a package, so tell pytest where to find `app`
+pythonpath = ["."]
