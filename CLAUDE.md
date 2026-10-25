@@ -108,7 +108,8 @@ Resident ⇄ Telegram ⇄ aiogram ⇄ FastAPI ⇄ LangGraph flow
 app/
   main.py            # FastAPI app + webhook endpoint
   config.py          # pydantic-settings, reads .env
-  bot/               # aiogram handlers and commands
+  logging_setup.py   # log format for all entry points; hides secrets (token) in every line
+  bot/               # aiogram handlers, middlewares, polling entry point
   graph/             # LangGraph state, nodes, edges
   services/          # stt.py, llm.py, extraction.py, classifier.py
   prompts/           # prompt files (*.md), versioned; never inline long prompts
@@ -130,6 +131,7 @@ Dockerfile
 Exists since Step 1.1: `app/config.py`, `tests/test_config.py`, and empty `__init__.py` in `app/` (+ `bot/ graph/ services/ memory/ db/ schemas/`), `ml/`, `eval/`, `tests/`.
 Exists since Step 1.2: `docker-compose.yml`. Docker named volumes `sr-bot2_pgdata` and `sr-bot2_redisdata` hold the data (outside the repo).
 Exists since Step 1.3: `.github/workflows/ci.yml` (GitHub Actions CI, one job `check`).
+Exists since Step 1.4: `app/bot/handlers.py` (Router: `/start` + echo), `app/bot/middlewares.py` (logs update type, chat ID, text length only), `app/bot/polling.py` (entry point), `app/logging_setup.py`, `tests/test_bot.py`, `tests/test_logging_setup.py`.
 
 ---
 
@@ -144,7 +146,7 @@ docker compose exec redis redis-cli ping  # expect PONG                         
 docker compose down                       # stop + delete containers; volumes (data) are KEPT   ✅ works (Step 1.2)
 # docker compose down -v                  # ALSO deletes the volumes = all data. Ask Momo first.
 uv run alembic upgrade head               # apply DB migrations
-uv run python -m app.bot.polling          # run the bot locally (no public URL needed)
+uv run python -m app.bot.polling          # run the bot locally (no public URL needed); stop with Ctrl+C   ✅ works (Step 1.4)
 uv run uvicorn app.main:app --reload      # API for webhook mode
 uv run pytest                             # tests                         ✅ works (Step 1.1)
 uv run ruff check . && uv run ruff format .   # lint + format          ✅ works (Step 1.1)
@@ -159,6 +161,7 @@ docker compose up -d metabase             # http://localhost:3000
 Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run the two ruff commands one after the other.
 Note: PowerShell 5.1 removes double quotes *inside* arguments passed to programs like `docker` (e.g. `sh -c '... "x" ...'`). Keep commands simple (as above), or use Git Bash for nested quotes.
 Note: Rancher Desktop must be running before any `docker` command.
+Note: only one copy of the bot can poll at a time; a second one gets a `Conflict` error from Telegram. The bot needs no Docker.
 
 ---
 
@@ -267,9 +270,9 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [ ] List the required fields
 
 **Backend & Memory**
-- [ ] Create the bot with @BotFather
+- [x] Create the bot with @BotFather
 - [x] Set up the repo structure and `.env` config
-- [ ] Build a polling bot that receives text and voice
+- [ ] Build a polling bot that receives text and voice (text ✅ Step 1.4; voice in Step 1.5)
 - [ ] Generate the mock unit registry
 - [ ] Sketch the DB tables on paper
 
@@ -435,6 +438,13 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-25 | CI pins uv `0.12.19`, the laptop's version (D2 A) | CI = laptop, repeatable results. Update `ci.yml` together with the laptop's uv |
 | 2026-10-25 | Actions pinned by readable version (D3 A, amended): `actions/checkout@v7` (major tag), `astral-sh/setup-uv@v10.3.2` (exact tag). Switch both to commit SHAs in Phase 5 | setup-uv has no `v10` tag, only exact tags from immutable releases (the first run failed on `@v10`). CI has no secrets and a read-only token, so a moved tag can do little harm now; the Phase 5 deploy step adds real secrets |
 | 2026-10-25 | Commit type `ci:` for CI files added to section 10 (D4 A). `style:` (formatting only) added too, because the learning-test fix used it | Standard Conventional Commits types; clearer history than `chore:` |
+| 2026-10-25 | aiogram `>=3.31.0,<4` (Step 1.4 D1 A). aiogram needs `pydantic<2.14`, so pydantic went from 2.14.1 to 2.13.5 | The brief names aiogram 3; `<4` blocks breaking changes; `uv.lock` pins the exact versions |
+| 2026-10-25 | Async code is tested with `asyncio.run()` inside normal tests, no `pytest-asyncio` (D2 A). Revisit in Phase 2 | No new dependency; enough for a few async tests. Redis/DB tests may need the plugin |
+| 2026-10-25 | `/start` greeting in English + Egyptian Arabic, in one message (D3 A) | The brief: Arabic + English; matches how residents write |
+| 2026-10-25 | The bot logs only update type, chat ID and text length, in one outer middleware. Every entry point calls `setup_logging(secrets=[...])`, which replaces each secret with `***` in every log line, tracebacks included (D4 B) | Section 9. The token is part of every request URL, and some aiohttp error messages contain that URL. One place to keep safe |
+| 2026-10-25 | Polling asks Telegram only for the update types our handlers use (`resolve_used_update_types()`). The Bot has no default parse mode | Less traffic; user text is sent back as plain text, never read as HTML |
+| 2026-10-25 | Ctrl+C on Windows: polling runs as a Task behind `asyncio.shield`; on cancel we call `dp.stop_polling()`, then re-raise (D5 B) | aiogram can't catch signals on Windows. asyncio's cancel closed the connection before polling stopped, which logged a false "Failed to fetch updates" ERROR on every stop |
+| 2026-10-25 | Entry-point modules use a fixed logger name (`app.bot.polling`), not `__name__` (D6 B) | With `python -m`, `__name__` is `__main__`; a stable name is easier to search in logs |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -443,6 +453,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - Final hosting: Oracle VM or Azure Container Apps free grant.
 - Value of N for conversation history, and the token budget per LLM call.
 - Whisper model size (`small` / `medium` / `large-v3` / `large-v3-turbo`): decide from Step 1.6 measurements on CPU. Laptop: i7-11800H 8 cores, 16 GB RAM, RTX 3050 4 GB.
+- One Telegram bot for everything, or a separate dev bot and demo/prod bot (decide before Phase 5: webhook and polling can't share one bot). Never write the bot's username or IDs in this public repo.
 
 ---
 
@@ -492,3 +503,11 @@ Format:
 - Status: ✅ `main` green since `ee31351` (job 11 s, cache saved, 14.4 MB). The first run (`24d6eab`) failed in "Set up job": `setup-uv@v10` does not exist, so it was pinned to `v10.3.2`. Learning test on branch `ci-learning-test`: single quotes → red ✗ (format check failed, pytest skipped); `ruff format .` → green ✓ (reused `main`'s cache); branch deleted with Momo's OK.
 - Known issues / TODO: Phase 5: pin both actions by commit SHA. The `pull_request` trigger is not tested yet (Phase 2 "Make CI run on every PR"). Step logs need a GitHub login (the public API returns 403); run status is public. No local workflow checker (`actionlint`/`act` would be new tools).
 - What Momo did: chose D1 A, D2 A, D3 A (then fix A after the failed run), D4 A; approved each commit, push and the branch deletion.
+
+### Step 1.4 — Telegram bot: text (2026-10-25)
+- Phase · role: Phase 1 · Backend & Memory
+- Files: `pyproject.toml` + `uv.lock` (aiogram 3.31.0), `app/bot/handlers.py`, `app/bot/middlewares.py`, `app/bot/polling.py`, `app/logging_setup.py`, `tests/test_bot.py`, `tests/test_logging_setup.py`. Local `.env`: token filled by Momo.
+- How it works: `polling.py` checks the token (fail fast), sets up logging (secrets → `***`) and long-polls Telegram with aiogram. A Router answers `/start` (English + Egyptian Arabic) and echoes any other text. An outer middleware logs only update type, chat ID and text length.
+- Status: ✅ pytest 10 passed, ruff clean. Live test on Momo's phone: greeting and English + Arabic echo correct. The full token, its secret part and all message texts were absent from the live logs (script printed yes/no only). Ctrl+C in Momo's terminal: clean stop, no ERROR (exit code 0 in the experiment). The first Ctrl+C test logged a false ERROR; cause found in aiogram's source, fixed with D5 B.
+- Known issues / TODO: aiogram caps pydantic below 2.14. The bot is public: anyone who finds its username can message it. The Linux stop path (aiogram's own SIGINT/SIGTERM handler) is not tested yet (Phase 3, Docker). Handler order (`start` before `echo`) was checked by hand, not by a test. Non-text messages get no reply yet (Step 1.5).
+- What Momo did: created the dev bot with @BotFather and filled `TELEGRAM_BOT_TOKEN` in `.env`; chose D1 A, D2 A, D3 A, D4 B, D5 B, D6 B; ran the live tests (phone + Ctrl+C twice).
