@@ -58,7 +58,7 @@ Start every answer with 2–3 sentences in very simple English saying what we ar
 | API | FastAPI + Uvicorn | Receives the Telegram webhook |
 | Conversation flow | LangGraph | Open-source library only; no paid LangSmith |
 | LLM | Groq free tier (default), Gemini Flash free tier (backup) | All calls go through `app/services/llm.py`; provider and model are set by env vars |
-| Speech-to-text | Groq Whisper `whisper-large-v3` | Accepts `.ogg` (Telegram voice format); 25 MB max. Backup: `faster-whisper` locally |
+| Speech-to-text | Self-hosted Whisper with `faster-whisper`, on CPU first | Reads Telegram `.ogg` directly (no ffmpeg install). Model size chosen from Step 1.6 measurements. Groq Whisper API only as a comparison in Step 1.6, never in the app |
 | Validation | Pydantic v2 | Every LLM output is validated against a schema |
 | Classifier | scikit-learn TF-IDF + LogisticRegression (v1) → SetFit or multilingual BERT (v2) | Train v2 on Colab/Kaggle free GPU |
 | Experiments | MLflow (local) | Log every training run |
@@ -78,8 +78,8 @@ Start every answer with 2–3 sentences in very simple English saying what we ar
 Resident ⇄ Telegram ⇄ aiogram ⇄ FastAPI ⇄ LangGraph flow
                                               │
       ┌──────────────┬───────────────┬────────┴──────┬──────────────┐
-  Groq Whisper   LLM client     Classifier      Redis (session)  PostgreSQL
-  (STT)          (extract)      (cat+urgency)   (state, turns)   (users, units, SRs)
+  Whisper        LLM client     Classifier      Redis (session)  PostgreSQL
+  (STT, local)   (extract)      (cat+urgency)   (state, turns)   (users, units, SRs)
                                                                      │
                                                                 Metabase (reads)
 ```
@@ -124,16 +124,24 @@ docs/                # project_brief, data_card.md, labeling_guide.md, model_rep
 tests/
 .github/workflows/ci.yml
 pyproject.toml  uv.lock  .python-version  .gitignore  .env.example   # exist since Step 1.1
-docker-compose.yml  Dockerfile
+docker-compose.yml   # exists since Step 1.2: postgres + redis (app and metabase come later)
+Dockerfile
 ```
 Exists since Step 1.1: `app/config.py`, `tests/test_config.py`, and empty `__init__.py` in `app/` (+ `bot/ graph/ services/ memory/ db/ schemas/`), `ml/`, `eval/`, `tests/`.
+Exists since Step 1.2: `docker-compose.yml`. Docker named volumes `sr-bot2_pgdata` and `sr-bot2_redisdata` hold the data (outside the repo).
 
 ---
 
 ## 6. Commands (planned; mark them as real once they work)
 ```bash
 uv sync                                   # install dependencies          ✅ works (Step 1.1)
-docker compose up -d postgres redis       # start databases
+docker compose up -d --wait postgres redis   # start databases, wait until healthy   ✅ works (Step 1.2)
+docker compose ps                         # status: both must say (healthy)       ✅ works (Step 1.2)
+docker compose config --quiet             # check the file + .env (never without --quiet: it prints the password)   ✅ works (Step 1.2)
+docker compose exec postgres psql -U srbot -d srbot   # SQL shell (\q to quit)  ✅ works (Step 1.2)
+docker compose exec redis redis-cli ping  # expect PONG                         ✅ works (Step 1.2)
+docker compose down                       # stop + delete containers; volumes (data) are KEPT   ✅ works (Step 1.2)
+# docker compose down -v                  # ALSO deletes the volumes = all data. Ask Momo first.
 uv run alembic upgrade head               # apply DB migrations
 uv run python -m app.bot.polling          # run the bot locally (no public URL needed)
 uv run uvicorn app.main:app --reload      # API for webhook mode
@@ -145,6 +153,8 @@ uv run python -m eval.run_eval
 docker compose up -d metabase             # http://localhost:3000
 ```
 Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run the two ruff commands one after the other.
+Note: PowerShell 5.1 removes double quotes *inside* arguments passed to programs like `docker` (e.g. `sh -c '... "x" ...'`). Keep commands simple (as above), or use Git Bash for nested quotes.
+Note: Rancher Desktop must be running before any `docker` command.
 
 ---
 
@@ -260,8 +270,8 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [ ] Sketch the DB tables on paper
 
 **Dashboard & DevOps**
-- [ ] Set up the GitHub repo and install Rancher Desktop
-- [ ] Write a docker compose file with Postgres and Redis
+- [x] Set up the GitHub repo and install Rancher Desktop
+- [x] Write a docker compose file with Postgres and Redis
 - [ ] Create a first GitHub Actions workflow (ruff + pytest)
 - [ ] List the dashboard charts the brief asks for
 
@@ -276,7 +286,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [ ] Hand-write 200–300 test requests in `eval/test_set.csv` (never used for training)
 
 **LLM & Speech**
-- [ ] Write `app/services/stt.py` using Groq Whisper
+- [ ] Write `app/services/stt.py` using self-hosted Whisper (`faster-whisper`)
 - [ ] Create the Pydantic extraction schema and the extraction prompt
 - [ ] Add follow-up questions for missing fields
 - [ ] Validate the output; re-ask once if the JSON is broken
@@ -410,6 +420,13 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-24 | `docs/project_brief.pdf` is git-ignored | Internal Emaar document; the repo is public and may be shared. Removing a file from git history later is hard |
 | 2026-10-24 | `DATABASE_URL` and `REDIS_URL` are `SecretStr`, like the API keys | The URLs contain passwords; they must never print by accident |
 | 2026-10-24 | Commit author email stays Momo's Gmail (option A, not the GitHub noreply address) | Momo's choice; it is visible in every commit of the public repo |
+| 2026-10-25 | Speech-to-text is self-hosted open-source Whisper, as the brief says. Replaces "Groq Whisper" from 2026-10-23; Groq stays for the LLM only | Brief: "Whisper (open-source, self-hosted)". Voice notes are personal data; self-hosted audio never leaves our machine |
+| 2026-10-25 | Whisper engine is `faster-whisper`, run on CPU first (GPU only if CPU is too slow). The Groq Whisper API is kept as a comparison in Step 1.6 only, never in the app | faster-whisper is faster, uses less memory, supports int8 and reads `.ogg` itself. The free server has no GPU, so CPU numbers are realistic. The Groq comparison gives a cloud vs self-hosted number for the report (fake voice notes only) |
+| 2026-10-25 | Keep Momo's full NYC 311 export (2020 to present, downloaded 2026-10-22, 15.0 GB) in `ml/data/raw/`. Step 1.7 decides: filter this file, or use a small API sample | Already downloaded; git-ignored there; GitHub rejects files over 100 MB |
+| 2026-10-25 | Images `postgres:16` and `redis:7` (standard Debian-based, not `-alpine`) (D1 B) | Most documented images, full locale support for Arabic text; size doesn't matter (downloaded once) |
+| 2026-10-25 | `DATABASE_URL` in `.env` is built from `POSTGRES_USER/PASSWORD/DB` with `${...}` (D2 B). Password: letters and digits only | Each value written once. Tested: Docker Compose and python-dotenv (pydantic-settings) both fill in `${...}` |
+| 2026-10-25 | Redis has no password for local development (D3 A). Postgres and Redis ports are bound to `127.0.0.1` only; URLs use `127.0.0.1`, not `localhost`. Revisit the Redis password in Phase 5 | Only this laptop can reach Redis (checked: closed on the network IP). On the server Redis will publish no port. `localhost` may try IPv6 first on Windows |
+| 2026-10-25 | Redis keeps its default snapshot saving (RDB) on the `redisdata` volume, not AOF. Compose passes only the needed variables (`environment:`), never `env_file: .env` | Enough for 30-minute sessions. Least privilege: API keys never enter the database containers |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -417,6 +434,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - Classifier v2: SetFit or multilingual BERT.
 - Final hosting: Oracle VM or Azure Container Apps free grant.
 - Value of N for conversation history, and the token budget per LLM call.
+- Whisper model size (`small` / `medium` / `large-v3` / `large-v3-turbo`): decide from Step 1.6 measurements on CPU. Laptop: i7-11800H 8 cores, 16 GB RAM, RTX 3050 4 GB.
 
 ---
 
@@ -447,6 +465,14 @@ Format:
 - Phase · role: Phase 1 · Backend & Memory
 - Files: `.gitignore`, `pyproject.toml`, `uv.lock`, `.python-version`, `.env.example`, `app/config.py`, `tests/test_config.py`, empty `__init__.py` packages (section 5). Local `.env` (git-ignored).
 - How it works: `app/config.py` reads settings from env vars and `.env`. All are optional; the 3 API keys and 2 DB URLs are `SecretStr`; `Settings.require()` lets each entry point fail fast, naming the missing variables. The 4 tests use fake values only and ignore the real `.env`.
-- Status: ⏸️ almost done. ✅ pytest 4 passed, ruff check + format clean, `uv sync` OK, `.env` ignored by git, first commit `5793af7`, remote `origin` added. ⏸️ Push not done yet (needs Momo's GitHub browser login).
-- Known issues / TODO: push. Harmless warnings: git LF→CRLF (optional `.gitattributes` later) and uv hardlink (cache on C:, project on D:). Rancher Desktop still not installed (needed for Step 1.2).
+- Status: ✅ done. pytest 4 passed, ruff check + format clean, `uv sync` OK, `.env` ignored by git. Commits `5793af7` + `edaafe5` pushed to `mohaitham22/sr2-bot` (`main` tracks `origin/main`).
+- Known issues / TODO: Momo's 15.0 GB NYC 311 export (`311_Service_Requests_from_2020_to_Present_20261022.csv`) moved from the root to `ml/data/raw/` (git-ignored ✅); Step 1.7 decides how to use it. Harmless warnings: git LF→CRLF, uv hardlink. Rancher Desktop not installed yet (Step 1.2).
 - What Momo did: chose D1 (optional + fail fast), D2 (ruff I/UP/B), D3 (ignore the brief), D4 (DB URLs are secrets), kept Gmail as commit email; created `.env` from the template and set `STT_MODEL`.
+
+### Step 1.2 — Postgres and Redis in Docker (2026-10-25)
+- Phase · role: Phase 1 · Dashboard & DevOps
+- Files: `docker-compose.yml` (new), `.env.example` (`POSTGRES_*` block, real `DATABASE_URL`/`REDIS_URL` formats). Local `.env` filled by Momo.
+- How it works: Compose runs `postgres:16` and `redis:7` in Rancher Desktop (dockerd). Data lives in named volumes; healthchecks use `pg_isready` and `redis-cli ping`; ports are bound to 127.0.0.1 only. Postgres values come from `.env` as required variables (`${VAR:?…}`), and `DATABASE_URL` is built from them.
+- Status: ✅ all checks run and passed: `config --quiet` OK; both `(healthy)`; PostgreSQL 16.15 + password login over TCP; Redis 7.4.11 `PONG`; ports open on 127.0.0.1, closed on the network IP; `Settings` loads both URLs; a test table + Redis key survived `restart` and `down`/`up` (new container IDs), then were dropped with Momo's OK. Both databases are empty.
+- Known issues / TODO: if `POSTGRES_*` are empty, `DATABASE_URL` is not empty, so `require()` does not catch it (Compose does). PowerShell 5.1 drops nested quotes (section 6 note). Harmless leftover docker context `desktop-linux`. Step 1.0 TODO closed: Rancher Desktop installed, Docker Desktop removed, engine tested.
+- What Momo did: started Rancher Desktop; chose D1 B, D2 B, D3 A and default RDB; filled `.env`; typed the password into `.env.example` by mistake, then cleared it and made a new password before the first start (nothing was committed).

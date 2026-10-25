@@ -1,0 +1,45 @@
+# Local databases for development (Step 1.2).
+# Start: docker compose up -d postgres redis
+# ${...} values are read from .env (see .env.example). Never run plain `docker compose config`:
+# it prints the password. Use `docker compose config --quiet` to check the file.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      # ":?" stops compose with this message if the value is missing in .env (fail fast).
+      # Only used the first time, when the pgdata volume is empty.
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    ports:
+      - "127.0.0.1:5432:5432"  # host IP : host port : container port. This laptop only.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # $$ = the container's own variable (not filled in by compose).
+      # -h 127.0.0.1 checks over TCP, so the temporary server of the first-time setup
+      # (socket only) does not count as ready.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s  # first start creates the database; failures here don't count
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"  # no password (CLAUDE.md section 13), so never 0.0.0.0
+    volumes:
+      - redisdata:/data  # Redis saves snapshots (dump.rdb) here and on a clean stop
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

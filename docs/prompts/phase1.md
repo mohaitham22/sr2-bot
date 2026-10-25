@@ -222,7 +222,7 @@ When the step is done: update CLAUDE.md (tick section 12, add a section 15 entry
 ---
 
 ## Step 1.6 — Early Whisper test on Egyptian Arabic
-**You'll need:** Groq and Gemini accounts, about 30 minutes to record 15 voice notes, and fake names and phone numbers.
+**You'll need:** Groq and Gemini accounts, about 30 minutes to record 15 voice notes, fake names and phone numbers, and about 7 GB of free disk space for the Whisper models.
 
 ```text
 Step 1.6 — Early Whisper test on Egyptian Arabic
@@ -230,22 +230,23 @@ Phase 1 · LLM & Speech
 
 Before anything else: re-read CLAUDE.md, docs/project_brief.pdf, and the Progress log (CLAUDE.md section 15). Tell me in 2–3 simple sentences where we are.
 
-Goal: test early whether Whisper understands Egyptian Arabic well enough. The brief lists this as a top risk.
+Goal: test early whether self-hosted Whisper understands Egyptian Arabic well enough, and which model size we need. The brief lists this as a top risk ("test Whisper sizes early"). We use faster-whisper on the CPU (CLAUDE.md section 13).
 
 My part comes first. Give me exact steps in 👉 Your turn:
-- Get a Groq API key and a Gemini API key (Gemini is for Phase 2), and put both in .env.
+- Get a Groq API key and a Gemini API key, and put both in .env. Groq is for the LLM (Phase 2) and the cloud comparison below; Gemini is the backup LLM (Phase 2).
 - Record test voice notes through the bot: 10 in Egyptian Arabic and 5 in English, like real maintenance complaints. Include unit numbers (e.g. B-204), building numbers and phone numbers, and make a few with background noise. Fake names and phone numbers only.
 - Write down what I actually said in each note in eval/voice/reference.csv (file name, language, text).
 
 Then build:
-1. Ask me before adding the groq package.
-2. eval/whisper_test.py: transcribe every file in eval/voice/raw/ with whisper-large-v3 and whisper-large-v3-turbo, once with automatic language detection and once with the language set. Save the results to eval/voice/results.csv (file, model, language setting, transcript, seconds taken). Retry with a pause on rate limits (HTTP 429).
-3. Help me score each transcript against my reference: is it usable for extraction (yes/no)? Are the unit number and phone digits correct?
-4. A short report in eval/reports/whisper_phase1.md: a results table, the % usable (the brief's target is 85% or more), which setting worked best, and common mistakes.
+1. Ask me before adding the faster-whisper and groq packages. Tell me where the models will be downloaded and how much space they need.
+2. eval/whisper_test.py: transcribe every file in eval/voice/raw/ with self-hosted faster-whisper on the CPU (int8), using the sizes small, medium, large-v3 and large-v3-turbo, once with automatic language detection and once with the language set. Save the results to eval/voice/results.csv (file, engine, model, language setting, transcript, seconds taken, real-time factor).
+3. Comparison only, never used in the app: run the same files through the Groq Whisper API (whisper-large-v3) and add them to results.csv. Retry with a pause on rate limits (HTTP 429).
+4. Help me score each transcript against my reference: is it usable for extraction (yes/no)? Are the unit number and phone digits correct?
+5. A short report in eval/reports/whisper_phase1.md: a results table, the % usable per model (the brief's target is 85% or more), the speed of each model on the CPU, self-hosted vs Groq, which setting worked best, and common mistakes. Recommend a model size; I decide.
 
-Teach me: how Whisper works at a high level, Egyptian Arabic vs Modern Standard Arabic, why numbers are hard in speech, language detection vs setting the language, large-v3 vs turbo (accuracy vs speed), word error rate (WER), and API rate limits.
+Teach me: how Whisper works at a high level, Egyptian Arabic vs Modern Standard Arabic, why numbers are hard in speech, language detection vs setting the language, model sizes (accuracy vs speed vs memory), int8 quantization, real-time factor, CPU vs GPU, word error rate (WER), and API rate limits.
 
-If the results are weak, explain the brief's fallback (asking the user to confirm the transcript) and let me decide. Add my decision to section 13.
+If the results are weak, explain the brief's fallback (asking the user to confirm the transcript) and let me decide. Add my decisions (model size, and the fallback if needed) to section 13.
 
 How to work: follow CLAUDE.md section 2 exactly. Explain the theory first in simple English, show your plan, and wait for my "go". Build one file at a time and explain each one. Never ask me to paste keys or tokens in the chat.
 When the step is done: update CLAUDE.md (tick section 12, add a section 15 entry with an honest status, log decisions in section 13, update sections 5 and 6 if needed), show me the changes, and end with the full summary: Done, How it works, Status, Concepts to review, Questions for my instructor, 👉 Your turn, Next.
