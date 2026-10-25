@@ -25,7 +25,8 @@ jobs:
           persist-credentials: false  # CI never pushes, so don't keep the token on disk
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        # setup-uv has no short "v10" tag, only exact tags; its releases are immutable.
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           version: "0.12.19"  # same as the laptop; update both together
           # Caching is on by default: the key is a hash of uv.lock + pyproject.toml.
