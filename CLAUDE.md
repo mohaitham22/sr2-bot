@@ -122,13 +122,14 @@ migrations/          # Alembic
 docs/                # project_brief, data_card.md, labeling_guide.md, model_report.md
   prompts/           # step-by-step prompts for each phase (phase1.md, ...)
 tests/
-.github/workflows/ci.yml
+.github/workflows/ci.yml   # exists since Step 1.3: ruff check, ruff format --check, pytest
 pyproject.toml  uv.lock  .python-version  .gitignore  .env.example   # exist since Step 1.1
 docker-compose.yml   # exists since Step 1.2: postgres + redis (app and metabase come later)
 Dockerfile
 ```
 Exists since Step 1.1: `app/config.py`, `tests/test_config.py`, and empty `__init__.py` in `app/` (+ `bot/ graph/ services/ memory/ db/ schemas/`), `ml/`, `eval/`, `tests/`.
 Exists since Step 1.2: `docker-compose.yml`. Docker named volumes `sr-bot2_pgdata` and `sr-bot2_redisdata` hold the data (outside the repo).
+Exists since Step 1.3: `.github/workflows/ci.yml` (GitHub Actions CI, one job `check`).
 
 ---
 
@@ -147,6 +148,9 @@ uv run python -m app.bot.polling          # run the bot locally (no public URL n
 uv run uvicorn app.main:app --reload      # API for webhook mode
 uv run pytest                             # tests                         ✅ works (Step 1.1)
 uv run ruff check . && uv run ruff format .   # lint + format          ✅ works (Step 1.1)
+uv run ruff format --check .              # only report, change nothing (what CI runs)   ✅ works (Step 1.3)
+uv sync --locked                          # fail if uv.lock is out of date (what CI runs) ✅ works (Step 1.3)
+# CI runs on GitHub on every push and pull request: https://github.com/mohaitham22/sr2-bot/actions   ✅ works (Step 1.3)
 uv run mlflow ui                          # http://localhost:5000
 uv run python -m ml.train_baseline
 uv run python -m eval.run_eval
@@ -210,7 +214,7 @@ Note: Rancher Desktop must be running before any `docker` command.
   - on invalid JSON, re-ask once, then fall back to asking the user
 - The classifier always returns a confidence. Set `needs_review` when confidence is below the threshold (threshold is set in Phase 4).
 - Tests: mock the LLM and STT in unit tests, so CI never spends free quota.
-- Commits: Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`). Keep PRs small.
+- Commits: Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `ci:`, `style:`). Keep PRs small.
 
 ---
 
@@ -272,7 +276,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 **Dashboard & DevOps**
 - [x] Set up the GitHub repo and install Rancher Desktop
 - [x] Write a docker compose file with Postgres and Redis
-- [ ] Create a first GitHub Actions workflow (ruff + pytest)
+- [x] Create a first GitHub Actions workflow (ruff + pytest)
 - [ ] List the dashboard charts the brief asks for
 
 **End of phase:** the bot replies, the data is mapped, and the scope is frozen. New ideas go on a stretch list.
@@ -427,6 +431,10 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-25 | `DATABASE_URL` in `.env` is built from `POSTGRES_USER/PASSWORD/DB` with `${...}` (D2 B). Password: letters and digits only | Each value written once. Tested: Docker Compose and python-dotenv (pydantic-settings) both fill in `${...}` |
 | 2026-10-25 | Redis has no password for local development (D3 A). Postgres and Redis ports are bound to `127.0.0.1` only; URLs use `127.0.0.1`, not `localhost`. Revisit the Redis password in Phase 5 | Only this laptop can reach Redis (checked: closed on the network IP). On the server Redis will publish no port. `localhost` may try IPv6 first on Windows |
 | 2026-10-25 | Redis keeps its default snapshot saving (RDB) on the `redisdata` volume, not AOF. Compose passes only the needed variables (`environment:`), never `env_file: .env` | Enough for 30-minute sessions. Least privilege: API keys never enter the database containers |
+| 2026-10-25 | CI runs on every push to any branch and on every pull request (D1 A) | Simplest; a plain push shows the result. Double runs while a PR is open are free in a public repo. Switch to "push to `main` + PRs" if they get noisy |
+| 2026-10-25 | CI pins uv `0.12.19`, the laptop's version (D2 A) | CI = laptop, repeatable results. Update `ci.yml` together with the laptop's uv |
+| 2026-10-25 | Actions pinned by readable version (D3 A, amended): `actions/checkout@v7` (major tag), `astral-sh/setup-uv@v10.3.2` (exact tag). Switch both to commit SHAs in Phase 5 | setup-uv has no `v10` tag, only exact tags from immutable releases (the first run failed on `@v10`). CI has no secrets and a read-only token, so a moved tag can do little harm now; the Phase 5 deploy step adds real secrets |
+| 2026-10-25 | Commit type `ci:` for CI files added to section 10 (D4 A). `style:` (formatting only) added too, because the learning-test fix used it | Standard Conventional Commits types; clearer history than `chore:` |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -476,3 +484,11 @@ Format:
 - Status: ✅ all checks run and passed: `config --quiet` OK; both `(healthy)`; PostgreSQL 16.15 + password login over TCP; Redis 7.4.11 `PONG`; ports open on 127.0.0.1, closed on the network IP; `Settings` loads both URLs; a test table + Redis key survived `restart` and `down`/`up` (new container IDs), then were dropped with Momo's OK. Both databases are empty.
 - Known issues / TODO: if `POSTGRES_*` are empty, `DATABASE_URL` is not empty, so `require()` does not catch it (Compose does). PowerShell 5.1 drops nested quotes (section 6 note). Harmless leftover docker context `desktop-linux`. Step 1.0 TODO closed: Rancher Desktop installed, Docker Desktop removed, engine tested.
 - What Momo did: started Rancher Desktop; chose D1 B, D2 B, D3 A and default RDB; filled `.env`; typed the password into `.env.example` by mistake, then cleared it and made a new password before the first start (nothing was committed).
+
+### Step 1.3 — CI with GitHub Actions (2026-10-25)
+- Phase · role: Phase 1 · Dashboard & DevOps
+- Files: `.github/workflows/ci.yml` (new). Commits `24d6eab` + fix `ee31351` on `main`.
+- How it works: on every push and PR, GitHub starts a new `ubuntu-latest` machine (now Ubuntu 26.04), installs uv 0.12.19, runs `uv sync --locked`, then `ruff check`, `ruff format --check` and `pytest`. No secrets; read-only token; 10-minute timeout. setup-uv caches packages, keyed by a hash of `uv.lock` + `pyproject.toml`.
+- Status: ✅ `main` green since `ee31351` (job 11 s, cache saved, 14.4 MB). The first run (`24d6eab`) failed in "Set up job": `setup-uv@v10` does not exist, so it was pinned to `v10.3.2`. Learning test on branch `ci-learning-test`: single quotes → red ✗ (format check failed, pytest skipped); `ruff format .` → green ✓ (reused `main`'s cache); branch deleted with Momo's OK.
+- Known issues / TODO: Phase 5: pin both actions by commit SHA. The `pull_request` trigger is not tested yet (Phase 2 "Make CI run on every PR"). Step logs need a GitHub login (the public API returns 403); run status is public. No local workflow checker (`actionlint`/`act` would be new tools).
+- What Momo did: chose D1 A, D2 A, D3 A (then fix A after the failed run), D4 A; approved each commit, push and the branch deletion.
