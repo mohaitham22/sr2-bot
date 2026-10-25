@@ -123,25 +123,28 @@ docs/                # project_brief, data_card.md, labeling_guide.md, model_rep
   prompts/           # step-by-step prompts for each phase (phase1.md, ...)
 tests/
 .github/workflows/ci.yml
-docker-compose.yml  Dockerfile  .env.example
+pyproject.toml  uv.lock  .python-version  .gitignore  .env.example   # exist since Step 1.1
+docker-compose.yml  Dockerfile
 ```
+Exists since Step 1.1: `app/config.py`, `tests/test_config.py`, and empty `__init__.py` in `app/` (+ `bot/ graph/ services/ memory/ db/ schemas/`), `ml/`, `eval/`, `tests/`.
 
 ---
 
 ## 6. Commands (planned; mark them as real once they work)
 ```bash
-uv sync                                   # install dependencies
+uv sync                                   # install dependencies          ✅ works (Step 1.1)
 docker compose up -d postgres redis       # start databases
 uv run alembic upgrade head               # apply DB migrations
 uv run python -m app.bot.polling          # run the bot locally (no public URL needed)
 uv run uvicorn app.main:app --reload      # API for webhook mode
-uv run pytest                             # tests
-uv run ruff check . && uv run ruff format .
+uv run pytest                             # tests                         ✅ works (Step 1.1)
+uv run ruff check . && uv run ruff format .   # lint + format          ✅ works (Step 1.1)
 uv run mlflow ui                          # http://localhost:5000
 uv run python -m ml.train_baseline
 uv run python -m eval.run_eval
 docker compose up -d metabase             # http://localhost:3000
 ```
+Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run the two ruff commands one after the other.
 
 ---
 
@@ -251,7 +254,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 
 **Backend & Memory**
 - [ ] Create the bot with @BotFather
-- [ ] Set up the repo structure and `.env` config
+- [x] Set up the repo structure and `.env` config
 - [ ] Build a polling bot that receives text and voice
 - [ ] Generate the mock unit registry
 - [ ] Sketch the DB tables on paper
@@ -406,6 +409,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-24 | Ruff: add rule groups `I` (import order), `UP` (modern Python 3.12 syntax), `B` (common bug patterns); line length 100 | Cheap to adopt now, while there is little code |
 | 2026-10-24 | `docs/project_brief.pdf` is git-ignored | Internal Emaar document; the repo is public and may be shared. Removing a file from git history later is hard |
 | 2026-10-24 | `DATABASE_URL` and `REDIS_URL` are `SecretStr`, like the API keys | The URLs contain passwords; they must never print by accident |
+| 2026-10-24 | Commit author email stays Momo's Gmail (option A, not the GitHub noreply address) | Momo's choice; it is visible in every commit of the public repo |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -438,3 +442,11 @@ Format:
 - Status: ✅ done. Quiz 5/5 correct. Tools: git 2.54.0 ✅ (name/email set), Python 3.12 ✅, uv 0.12.19 ✅, Brief ✅. Docker CLI 29.9.2 + Compose v5.6.0 ⚠️: they come from Docker Desktop, which will be replaced by Rancher Desktop (not installed yet).
 - Known issues / TODO: Install Rancher Desktop (dockerd engine), remove Docker Desktop, test the engine (needed by Step 1.2). The repo is public, so ask the instructor before committing `docs/project_brief.pdf`.
 - What Momo did: Answered the quiz (5/5); found the section 9 gap and chose the new wording (A); chose Rancher Desktop; created the public repo `mohaitham22/sr2-bot`; added phase1.md.
+
+### Step 1.1 — Project skeleton and settings (2026-10-24)
+- Phase · role: Phase 1 · Backend & Memory
+- Files: `.gitignore`, `pyproject.toml`, `uv.lock`, `.python-version`, `.env.example`, `app/config.py`, `tests/test_config.py`, empty `__init__.py` packages (section 5). Local `.env` (git-ignored).
+- How it works: `app/config.py` reads settings from env vars and `.env`. All are optional; the 3 API keys and 2 DB URLs are `SecretStr`; `Settings.require()` lets each entry point fail fast, naming the missing variables. The 4 tests use fake values only and ignore the real `.env`.
+- Status: ⏸️ almost done. ✅ pytest 4 passed, ruff check + format clean, `uv sync` OK, `.env` ignored by git, first commit `5793af7`, remote `origin` added. ⏸️ Push not done yet (needs Momo's GitHub browser login).
+- Known issues / TODO: push. Harmless warnings: git LF→CRLF (optional `.gitattributes` later) and uv hardlink (cache on C:, project on D:). Rancher Desktop still not installed (needed for Step 1.2).
+- What Momo did: chose D1 (optional + fail fast), D2 (ruff I/UP/B), D3 (ignore the brief), D4 (DB URLs are secrets), kept Gmail as commit email; created `.env` from the template and set `STT_MODEL`.
