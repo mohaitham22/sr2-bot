@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from app.config import Settings
 
@@ -13,6 +14,7 @@ ENV_NAMES = [
     "DATABASE_URL",
     "REDIS_URL",
     "STT_MODEL",
+    "VOICE_SAVE_USER_IDS",
 ]
 
 FAKE_SECRETS = {
@@ -68,3 +70,21 @@ def test_require_names_the_missing_variable(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(RuntimeError, match="GROQ_API_KEY") as error:
         settings.require("telegram_bot_token", "groq_api_key")
     assert "TELEGRAM_BOT_TOKEN" not in str(error.value)
+
+
+def test_voice_user_ids_are_a_json_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOICE_SAVE_USER_IDS", "[111, 222]")  # fake IDs
+
+    settings = Settings(_env_file=None)
+
+    assert settings.voice_save_user_ids == frozenset({111, 222})
+
+
+@pytest.mark.parametrize("value", ["111", "abc"])  # no brackets / not a number
+def test_voice_user_ids_wrong_format_stops_at_startup(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("VOICE_SAVE_USER_IDS", value)
+
+    with pytest.raises(ValidationError, match="voice_save_user_ids"):
+        Settings(_env_file=None)

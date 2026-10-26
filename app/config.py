@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     # Not secret
     stt_model: str | None = None
+    # Telegram user IDs whose voice notes the bot saves for testing (D2 A). A JSON list in .env,
+    # e.g. [123456789]. Not set: nobody's voice notes are saved. Real IDs never go in the repo.
+    voice_save_user_ids: frozenset[int] | None = None
 
     def require(self, *names: str) -> None:
         """Fail fast: stop if any of the named settings is not set.

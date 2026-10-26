@@ -23,6 +23,8 @@ ml/data/processed/
 mlruns/
 
 # --- Audio: voice notes are personal data ---
+# Test voice notes saved by the bot (Step 1.5): the whole folder, not only the audio files
+eval/voice/raw/
 *.ogg
 *.oga
 *.opus
