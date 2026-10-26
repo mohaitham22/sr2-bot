@@ -119,6 +119,7 @@ app/
 ml/                  # data prep, train_baseline.py, train_setfit.py
   data/raw/ data/processed/   # git-ignored
 eval/                # test_set.csv, run_eval.py, ml_vs_llm.py
+  voice/raw/         # test voice notes saved by the bot (git-ignored, the whole folder)
 migrations/          # Alembic
 docs/                # project_brief, data_card.md, labeling_guide.md, model_report.md
   prompts/           # step-by-step prompts for each phase (phase1.md, ...)
@@ -132,6 +133,7 @@ Exists since Step 1.1: `app/config.py`, `tests/test_config.py`, and empty `__ini
 Exists since Step 1.2: `docker-compose.yml`. Docker named volumes `sr-bot2_pgdata` and `sr-bot2_redisdata` hold the data (outside the repo).
 Exists since Step 1.3: `.github/workflows/ci.yml` (GitHub Actions CI, one job `check`).
 Exists since Step 1.4: `app/bot/handlers.py` (Router: `/start` + echo), `app/bot/middlewares.py` (logs update type, chat ID, text length only), `app/bot/polling.py` (entry point), `app/logging_setup.py`, `tests/test_bot.py`, `tests/test_logging_setup.py`.
+Exists since Step 1.5: `app/bot/voice_files.py` (folder + file names for test voice notes), `tests/test_voice_files.py`, `tests/test_polling.py`. `handlers.py` also has `save_voice` and the catch-all `unsupported`; `polling.py` has `build_dispatcher()`. The bot creates `eval/voice/raw/` on the first saved voice note.
 
 ---
 
@@ -162,6 +164,8 @@ Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run t
 Note: PowerShell 5.1 removes double quotes *inside* arguments passed to programs like `docker` (e.g. `sh -c '... "x" ...'`). Keep commands simple (as above), or use Git Bash for nested quotes.
 Note: Rancher Desktop must be running before any `docker` command.
 Note: only one copy of the bot can poll at a time; a second one gets a `Conflict` error from Telegram. The bot needs no Docker.
+Note: voice notes are saved to `eval/voice/raw/` only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, a JSON list like `[123456789]`; the brackets are required). Your ID = the `chat_id` in the bot's log for your private chat.
+Note: messages sent while the bot is off wait at Telegram (pending updates) and all arrive at once when it starts.
 
 ---
 
@@ -272,7 +276,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 **Backend & Memory**
 - [x] Create the bot with @BotFather
 - [x] Set up the repo structure and `.env` config
-- [ ] Build a polling bot that receives text and voice (text ✅ Step 1.4; voice in Step 1.5)
+- [x] Build a polling bot that receives text and voice (text ✅ Step 1.4; voice ✅ Step 1.5)
 - [ ] Generate the mock unit registry
 - [ ] Sketch the DB tables on paper
 
@@ -445,6 +449,10 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-25 | Polling asks Telegram only for the update types our handlers use (`resolve_used_update_types()`). The Bot has no default parse mode | Less traffic; user text is sent back as plain text, never read as HTML |
 | 2026-10-25 | Ctrl+C on Windows: polling runs as a Task behind `asyncio.shield`; on cancel we call `dp.stop_polling()`, then re-raise (D5 B) | aiogram can't catch signals on Windows. asyncio's cancel closed the connection before polling stopped, which logged a false "Failed to fetch updates" ERROR on every stop |
 | 2026-10-25 | Entry-point modules use a fixed logger name (`app.bot.polling`), not `__name__` (D6 B) | With `python -m`, `__name__` is `__main__`; a stable name is easier to search in logs |
+| 2026-10-25 | Test voice notes are saved as `eval/voice/raw/YYYY-MM-DD_NNN.ogg` (Step 1.5 D1 A): laptop's local date; next number = highest of that day + 1; an empty file is created at once to reserve the name | Short names for `reference.csv` (Step 1.6), files sort in recording order. Reserving the name stops two handlers running at the same time from taking one name (seen live: 2 pending updates → `003` + `004`). Deleting the latest file reuses its number, so delete its `reference.csv` row too |
+| 2026-10-25 | Voice notes are saved only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, JSON list) (D2 A). Empty = nobody's. Anyone else gets "not available", and nothing is downloaded | The bot is public, and Step 1.6 sends `eval/voice/raw/` to Groq: a stranger's real voice must never get there (section 9). Real IDs only in `.env`, never in the repo |
+| 2026-10-25 | Audio is saved to disk only for our own test recordings with fake data; the real flow (Phase 3) transcribes in memory and keeps no audio. The whole folder `eval/voice/raw/` is git-ignored, not only audio file types | Voice notes are personal data (section 9); the repo is public and git never forgets |
+| 2026-10-25 | Handlers get paths and settings through aiogram workflow data (`dp["voice_dir"]`, dependency injection); settings are read only in `main()`. `build_dispatcher()` sets it up, and one test checks the wiring in CI (Momo: "do your recommendation") | One place reads settings; tests pass a temporary folder. Phase 3 will inject more values (Redis, DB), so a name mismatch must fail in CI, not live. Duplicate check by `file_unique_id` and content type in the middleware log: not now |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -511,3 +519,11 @@ Format:
 - Status: ✅ pytest 10 passed, ruff clean. Live test on Momo's phone: greeting and English + Arabic echo correct. The full token, its secret part and all message texts were absent from the live logs (script printed yes/no only). Ctrl+C in Momo's terminal: clean stop, no ERROR (exit code 0 in the experiment). The first Ctrl+C test logged a false ERROR; cause found in aiogram's source, fixed with D5 B.
 - Known issues / TODO: aiogram caps pydantic below 2.14. The bot is public: anyone who finds its username can message it. The Linux stop path (aiogram's own SIGINT/SIGTERM handler) is not tested yet (Phase 3, Docker). Handler order (`start` before `echo`) was checked by hand, not by a test. Non-text messages get no reply yet (Step 1.5).
 - What Momo did: created the dev bot with @BotFather and filled `TELEGRAM_BOT_TOKEN` in `.env`; chose D1 A, D2 A, D3 A, D4 B, D5 B, D6 B; ran the live tests (phone + Ctrl+C twice).
+
+### Step 1.5 — Telegram bot: voice notes (2026-10-26)
+- Phase · role: Phase 1 · Backend & Memory
+- Files: `app/bot/voice_files.py` (new), `app/bot/handlers.py` (`save_voice`, `unsupported`, greeting line), `app/bot/polling.py`, `app/config.py` + `.env.example` (`VOICE_SAVE_USER_IDS`), `.gitignore` (`eval/voice/raw/`), `tests/test_voice_files.py` + `tests/test_polling.py` (new), `tests/test_bot.py`, `tests/test_config.py`. Local `.env`: Momo's ID.
+- How it works: for a voice note from an allowed ID, the bot checks the 20 MB limit, reserves the next file name, calls getFile, downloads the OGG/Opus file and replies with name, duration and size (English + Arabic). On any error the half-written file is deleted. Other message types get a polite reply; logs hold only the content type, file name and numbers.
+- Status: ✅ pytest 26 passed, ruff clean; 3 deliberate breaks (no file cleanup, no allowlist, wrong `dp` key) were caught by the right tests. Live: `001` (2.65 s) and `003` (Arabic, 20.87 s) are valid OGG/Opus (all page CRCs OK), Momo played them, not in `git status`. Duplicates explained, not bugs: one note sent twice (`002`); 2 notes sent while the bot was off arrived together (`004`, 44 ms after `003`; the name reservation worked). Copies deleted with Momo's OK.
+- Known issues / TODO: The same note sent twice is saved twice (no check of `file_unique_id`). `001` (2.65 s) and `003` (Arabic) count toward Step 1.6's recordings: Momo writes what was said in `reference.csv`. Closes 1.4 TODOs: handler order is now tested; non-text messages get a reply. The 311 CSV had moved back to the repo root (Oct 25, 16:41, not by Claude); moved to `ml/data/raw/` again with Momo's OK.
+- What Momo did: chose D1 A, D2 A and bilingual replies; found the user ID in the bot's log and set `VOICE_SAVE_USER_IDS` in `.env`; ran the live test and played the files; explained the duplicates; approved the CSV move and deleting `002`/`004`.
