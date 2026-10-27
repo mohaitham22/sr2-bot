@@ -22,9 +22,13 @@ ml/data/processed/
 # --- ML experiments (MLflow local runs) ---
 mlruns/
 
+# --- Downloaded models: several GB each (Step 1.6) ---
+models/
+
 # --- Audio: voice notes are personal data ---
-# Test voice notes saved by the bot (Step 1.5): the whole folder, not only the audio files
-eval/voice/raw/
+# Test voice notes (Step 1.5) and their texts: reference, transcripts, scores, judgments
+# (Step 1.6 D12 A). The whole folder, not only the audio files
+eval/voice/
 *.ogg
 *.oga
 *.opus

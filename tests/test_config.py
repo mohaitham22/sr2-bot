@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import ROOT_DIR, Settings
 
 ENV_NAMES = [
     "TELEGRAM_BOT_TOKEN",
@@ -14,6 +14,7 @@ ENV_NAMES = [
     "DATABASE_URL",
     "REDIS_URL",
     "STT_MODEL",
+    "STT_MODEL_DIR",
     "VOICE_SAVE_USER_IDS",
 ]
 
@@ -78,6 +79,22 @@ def test_voice_user_ids_are_a_json_list(monkeypatch: pytest.MonkeyPatch) -> None
     settings = Settings(_env_file=None)
 
     assert settings.voice_save_user_ids == frozenset({111, 222})
+
+
+def test_stt_model_dir_relative_starts_at_project_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STT_MODEL_DIR", "models/whisper")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.stt_model_dir == ROOT_DIR / "models" / "whisper"
+
+
+def test_stt_model_dir_absolute_is_kept(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("STT_MODEL_DIR", str(tmp_path))
+
+    settings = Settings(_env_file=None)
+
+    assert settings.stt_model_dir == tmp_path
 
 
 @pytest.mark.parametrize("value", ["111", "abc"])  # no brackets / not a number

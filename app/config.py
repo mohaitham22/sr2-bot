@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Project root (the folder that holds pyproject.toml), so .env is found from any working directory
@@ -29,9 +29,20 @@ class Settings(BaseSettings):
 
     # Not secret
     stt_model: str | None = None
+    # Folder for the downloaded Whisper models (several GB; Step 1.6 D5 A). Not set: Hugging Face's
+    # default cache on C:. A relative path starts at ROOT_DIR, not at the current folder.
+    stt_model_dir: Path | None = None
     # Telegram user IDs whose voice notes the bot saves for testing (D2 A). A JSON list in .env,
     # e.g. [123456789]. Not set: nobody's voice notes are saved. Real IDs never go in the repo.
     voice_save_user_ids: frozenset[int] | None = None
+
+    @field_validator("stt_model_dir")
+    @classmethod
+    def _start_at_root(cls, value: Path | None) -> Path | None:
+        """Make a relative path start at the project root, so it is the same folder everywhere."""
+        if value is None or value.is_absolute():
+            return value
+        return ROOT_DIR / value
 
     def require(self, *names: str) -> None:
         """Fail fast: stop if any of the named settings is not set.
