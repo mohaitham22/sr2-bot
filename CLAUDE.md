@@ -116,8 +116,9 @@ app/
   memory/            # Redis session store
   db/                # SQLAlchemy models, session, repositories
   schemas/           # Pydantic models
-ml/                  # data prep, train_baseline.py, train_setfit.py
-  data/raw/ data/processed/   # git-ignored
+ml/                  # data prep (sample_311.py), train_baseline.py, train_setfit.py
+  data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample
+  notebooks/         # EDA notebooks, saved with outputs (01_explore_311.ipynb)
 eval/                # test_set.csv, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py
   voice/             # git-ignored, the whole folder: raw/ (test voice notes saved by the bot),
                      #   reference.csv, results.csv, scores.csv, judgments.csv, review.md (Step 1.6)
@@ -138,6 +139,7 @@ Exists since Step 1.3: `.github/workflows/ci.yml` (GitHub Actions CI, one job `c
 Exists since Step 1.4: `app/bot/handlers.py` (Router: `/start` + echo), `app/bot/middlewares.py` (logs update type, chat ID, text length only), `app/bot/polling.py` (entry point), `app/logging_setup.py`, `tests/test_bot.py`, `tests/test_logging_setup.py`.
 Exists since Step 1.5: `app/bot/voice_files.py` (folder + file names for test voice notes), `tests/test_voice_files.py`, `tests/test_polling.py`. `handlers.py` also has `save_voice` and the catch-all `unsupported`; `polling.py` has `build_dispatcher()`. The bot creates `eval/voice/raw/` on the first saved voice note.
 Exists since Step 1.6: `eval/whisper_test.py` (transcribe the test notes: local models + Groq), `eval/score_whisper.py` (WER/CER, number checks, judgments → summary), `tests/test_whisper_test.py`, `tests/test_score_whisper.py`, `eval/reports/whisper_phase1.md`. `config.py` has `stt_model_dir`.
+Exists since Step 1.7: `ml/sample_311.py` (HPD sample + full counts from the local 311 export), `tests/test_sample_311.py`, `ml/notebooks/01_explore_311.ipynb`. Git-ignored outputs: `ml/data/raw/311_hpd_sample.csv`, `ml/data/raw/311_hpd_population_counts.csv`.
 
 ---
 
@@ -165,6 +167,8 @@ uv run python -m eval.run_eval
 uv run python -m eval.whisper_test        # Step 1.6 Whisper test: local models, then Groq → eval/voice/results.csv (resumes)   ✅ works (Step 1.6)
 uv run python -m eval.whisper_test --engine local --models small   # one engine / model only   ✅ works (Step 1.6)
 uv run python -m eval.score_whisper       # score results.csv → scores.csv, review.md + summary table   ✅ works (Step 1.6)
+uv run python -m ml.sample_311            # Step 1.7: read the 16 GB 311 export → HPD sample + full counts in ml/data/raw/ (about 3 min)   ✅ works (Step 1.7)
+uv run jupyter nbconvert --to notebook --execute --inplace ml/notebooks/01_explore_311.ipynb   # run a notebook, outputs saved in the file (or VS Code: kernel .venv, Run All)   ✅ works (Step 1.7)
 docker compose up -d metabase             # http://localhost:3000
 ```
 Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run the two ruff commands one after the other.
@@ -270,7 +274,7 @@ Data and LLM work feeds the backend, and the backend feeds the dashboard and dep
 Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 
 **Data & ML**
-- [ ] Download the NYC 311 data and keep only housing complaints
+- [x] Download the NYC 311 data and keep only housing complaints (Momo's export, filtered to HPD by `ml/sample_311.py`; explored in Step 1.7)
 - [ ] Map complaint types to the 6 categories and an urgency level
 - [ ] Write `docs/labeling_guide.md`
 - [ ] Start `docs/data_card.md`
@@ -474,6 +478,10 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-27 | STT model: local `large-v3`, int8, CPU (D10 A). Backup: `medium` if the server is too slow (re-measure in Phase 5) | 80% usable Arabic (same as medium and Groq; target 85% not met), the only local model that kept the problem in 10/10 notes, best CER (0.24), language 15/15. Cost: about 21 s (language set) / 28 s (auto) for a 25 s note on 4 laptop threads |
 | 2026-10-27 | Always show the transcript of a voice note; the user confirms or corrects it before extraction (D11 A) | The brief's fallback. No model reached 85%; the typical mistakes (a unit letter, one digit, a lost word like "gas") take a person seconds to spot |
 | 2026-10-27 | All of `eval/voice/` is git-ignored: voice notes, reference, results, scores, judgments, review (D12 A). Only the scripts, tests and the report (phones masked) are committed | Momo's words and fake phone numbers must not stay in a public repo forever |
+| 2026-10-27 | 311 source: Momo's local export (2026-10-22, all rows), filtered by `ml/sample_311.py`; not the API (Step 1.7 D1 B). Closes the 2026-10-25 question; the export stays in `ml/data/raw/` | Already on disk, no internet needed, 3 minutes to read. Cost: repeating it needs the same export (a newer one differs a little: 2 rows in 5 days) |
+| 2026-10-27 | Sample: agency `HPD`, 2025-10-01 ≤ created < 2026-10-01, `unique_key` ends in 7 (about 10%), at most 100,000 rows; plus counts of ALL rows in the window per (type, descriptor, details) (D2 A) | Spread over the whole year: heat is seasonal (62% of January, 7% of August). The full counts prove the sample is fair (≤ 0.08 points off per type) |
+| 2026-10-27 | Keep 14 columns, saved with API names and ISO 8601 dates; no addresses or coordinates (D3 A) | Data minimization; stable names if the website renames columns again (it did: "Problem (formerly Complaint Type)") |
+| 2026-10-27 | pandas, ipykernel, nbconvert, matplotlib in the `dev` group (D4 A). Notebooks are committed with their outputs (counts and charts only) | Only ML work needs them, not the bot. The instructor can read results on GitHub. Revisit the groups when scikit-learn comes (Phase 2) |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -556,3 +564,13 @@ Format:
 - Status: ⚠️ works with issues. pytest 59 passed, ruff clean, 6 deliberate breaks caught by the right tests; full CPU run (about 28 min of transcription + 39 min of model downloads) and Groq run done (10 live 429s, all recovered). Result: best usable Arabic 80% (medium, large-v3, Groq) < 85% target → D10 A + fallback D11 A. Issues: the 31 Arabic judgments of the large models are Claude's only (not reviewed by Momo); each Arabic note = 10 points; `set` uses the oracle language; WER is too pessimistic (numbers in words, fillers, reference ≠ audio in V02/V07/V10).
 - Known issues / TODO: Momo sets `STT_MODEL=large-v3` in `.env`. Re-measure speed on the server (Phase 5). Parked second-round ideas (report section 11: scoring normalization, VAD, initial_prompt, float32, forced `ar`, Egyptian fine-tunes, Cohere) → stretch list in Step 1.12. `MAdel121/whisper-medium-egy` checked (card only): SpeechBrain mid-training checkpoint, dataset without license, not usable.
 - What Momo did: got the Groq + Gemini keys; recorded 15 notes full of hard cases and wrote `reference.csv`; chose D1 A, D2 (own format), D3 B, D4–D9 A, D10 A, D11 A, D12 A; reviewed 21 Arabic judgments (changed V05); listened to V11/V12/V15 (the reference was right: model errors).
+
+### Step 1.7 — Explore the NYC 311 data (2026-10-27)
+- Phase · role: Phase 1 · Data & ML
+- Files: `ml/sample_311.py`, `tests/test_sample_311.py`, `ml/notebooks/01_explore_311.ipynb` (new); `pyproject.toml` + `uv.lock` (dev: pandas 3.1.0, ipykernel 7.4.0, nbconvert 7.17.2, matplotlib 3.11.2; 57 packages in total). Git-ignored: `311_hpd_sample.csv` (90,405 rows, 45.6 MB) and `311_hpd_population_counts.csv` (174 groups) in `ml/data/raw/`.
+- Source (for the data card, Step 1.10): NYC Open Data "311 Service Requests from 2020 to Present", ID `erm2-nwe9`, https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9/about_data (publisher OTI, updated daily; 2010–2019 is `76ig-c548`). License field empty; NYC Open Data Terms of Use: "provided for informational purposes", no warranty of "completeness, accuracy, content, or fitness"; FAQ: "There are no restrictions on the use of Open Data." No personal data about the caller (dataset description). Export: CSV of all rows by Momo on 2026-10-22, 16.1 GB, 22,879,856 rows.
+- Filters: agency = `HPD`; 2025-10-01 ≤ created < 2026-10-01; `unique_key` ends in `7`; at most 100,000 rows; 14 columns (D1 B, D2 A, D3 A). Population 904,284 HPD rows (live API on 2026-10-27: 904,286).
+- How it works: `sample_311` reads the export row by row (174 s, constant memory). It counts every HPD row in the window and writes the 10% sample (API names, ISO dates; `.part` file renamed at the end). The notebook answers the 5 questions: 3-level tree of fixed choices (13 types, 60 pairs, 174 groups); no resident free text (`resolution_description` = 37 HPD templates); missing data low (`closed_date` 3.1% = the Open ones; `descriptor_2` "N/A" 4.3%); very unbalanced (heat 39.7%, biggest/smallest 308×).
+- Status: ✅ script run: 0 bad rows, sample 90,405, no cap. pytest 64 passed (5 new), 2 deliberate breaks caught by the right tests, ruff clean (notebook included), notebook ran with 0 errors, sample within 0.08 points of the population for every type, data files not in `git status`.
+- Known issues / TODO: for Step 1.8: no air conditioning in HPD data (closest: GENERAL / VENTILATION SYSTEM, 4,722); heat (39.7%) has no category of its own; one odd row `Safety/Safety/Safety`. The terms quotes come from copies (the live page blocks tools: 403/404); Momo checks them in a browser. Missing data checked only for our 14 columns. Decide in Step 1.12 whether to keep the 16 GB export.
+- What Momo did: chose D1 B (local export, not the API), D2 A, D3 A, D4 A; approved the section 12 tick.
