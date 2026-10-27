@@ -58,7 +58,7 @@ Start every answer with 2–3 sentences in very simple English saying what we ar
 | API | FastAPI + Uvicorn | Receives the Telegram webhook |
 | Conversation flow | LangGraph | Open-source library only; no paid LangSmith |
 | LLM | Groq free tier (default), Gemini Flash free tier (backup) | All calls go through `app/services/llm.py`; provider and model are set by env vars |
-| Speech-to-text | Self-hosted Whisper with `faster-whisper`, on CPU first | Reads Telegram `.ogg` directly (no ffmpeg install). Model size chosen from Step 1.6 measurements. Groq Whisper API only as a comparison in Step 1.6, never in the app |
+| Speech-to-text | Self-hosted Whisper with `faster-whisper`, on CPU first | Reads Telegram `.ogg` directly (no ffmpeg install). Model `large-v3`, int8, CPU (Step 1.6 D10 A; `medium` is the backup). Groq Whisper API only as a comparison in Step 1.6, never in the app |
 | Validation | Pydantic v2 | Every LLM output is validated against a schema |
 | Classifier | scikit-learn TF-IDF + LogisticRegression (v1) → SetFit or multilingual BERT (v2) | Train v2 on Colab/Kaggle free GPU |
 | Experiments | MLflow (local) | Log every training run |
@@ -85,7 +85,7 @@ Resident ⇄ Telegram ⇄ aiogram ⇄ FastAPI ⇄ LangGraph flow
 ```
 
 **LangGraph nodes** (in order):
-1. `transcribe`: only for voice notes.
+1. `transcribe`: only for voice notes. The bot shows the transcript and the user confirms or corrects it (Step 1.6 D11 A).
 2. `extract`
 3. `ask_missing`: loops back to `extract` until all required fields are filled.
 4. `confirm`: show a summary and wait for yes/edit.
@@ -118,8 +118,11 @@ app/
   schemas/           # Pydantic models
 ml/                  # data prep, train_baseline.py, train_setfit.py
   data/raw/ data/processed/   # git-ignored
-eval/                # test_set.csv, run_eval.py, ml_vs_llm.py
-  voice/raw/         # test voice notes saved by the bot (git-ignored, the whole folder)
+eval/                # test_set.csv, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py
+  voice/             # git-ignored, the whole folder: raw/ (test voice notes saved by the bot),
+                     #   reference.csv, results.csv, scores.csv, judgments.csv, review.md (Step 1.6)
+  reports/           # whisper_phase1.md (Step 1.6)
+models/              # downloaded Whisper models, about 6.7 GB (git-ignored; STT_MODEL_DIR)
 migrations/          # Alembic
 docs/                # project_brief, data_card.md, labeling_guide.md, model_report.md
   prompts/           # step-by-step prompts for each phase (phase1.md, ...)
@@ -134,6 +137,7 @@ Exists since Step 1.2: `docker-compose.yml`. Docker named volumes `sr-bot2_pgdat
 Exists since Step 1.3: `.github/workflows/ci.yml` (GitHub Actions CI, one job `check`).
 Exists since Step 1.4: `app/bot/handlers.py` (Router: `/start` + echo), `app/bot/middlewares.py` (logs update type, chat ID, text length only), `app/bot/polling.py` (entry point), `app/logging_setup.py`, `tests/test_bot.py`, `tests/test_logging_setup.py`.
 Exists since Step 1.5: `app/bot/voice_files.py` (folder + file names for test voice notes), `tests/test_voice_files.py`, `tests/test_polling.py`. `handlers.py` also has `save_voice` and the catch-all `unsupported`; `polling.py` has `build_dispatcher()`. The bot creates `eval/voice/raw/` on the first saved voice note.
+Exists since Step 1.6: `eval/whisper_test.py` (transcribe the test notes: local models + Groq), `eval/score_whisper.py` (WER/CER, number checks, judgments → summary), `tests/test_whisper_test.py`, `tests/test_score_whisper.py`, `eval/reports/whisper_phase1.md`. `config.py` has `stt_model_dir`.
 
 ---
 
@@ -158,6 +162,9 @@ uv sync --locked                          # fail if uv.lock is out of date (what
 uv run mlflow ui                          # http://localhost:5000
 uv run python -m ml.train_baseline
 uv run python -m eval.run_eval
+uv run python -m eval.whisper_test        # Step 1.6 Whisper test: local models, then Groq → eval/voice/results.csv (resumes)   ✅ works (Step 1.6)
+uv run python -m eval.whisper_test --engine local --models small   # one engine / model only   ✅ works (Step 1.6)
+uv run python -m eval.score_whisper       # score results.csv → scores.csv, review.md + summary table   ✅ works (Step 1.6)
 docker compose up -d metabase             # http://localhost:3000
 ```
 Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run the two ruff commands one after the other.
@@ -166,6 +173,7 @@ Note: Rancher Desktop must be running before any `docker` command.
 Note: only one copy of the bot can poll at a time; a second one gets a `Conflict` error from Telegram. The bot needs no Docker.
 Note: voice notes are saved to `eval/voice/raw/` only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, a JSON list like `[123456789]`; the brackets are required). Your ID = the `chat_id` in the bot's log for your private chat.
 Note: messages sent while the bot is off wait at Telegram (pending updates) and all arrive at once when it starts.
+Note: Momo's terminal uses code page cp1252 and cannot print Arabic. Scripts write Arabic only to UTF-8 files. To send Python output with Arabic to a file, set `PYTHONIOENCODING=utf-8`.
 
 ---
 
@@ -268,9 +276,9 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [ ] Start `docs/data_card.md`
 
 **LLM & Speech**
-- [ ] Get Groq and Gemini API keys
-- [ ] Record a few Arabic and English voice notes
-- [ ] Test Whisper on Egyptian Arabic early (top risk in the brief)
+- [x] Get Groq and Gemini API keys
+- [x] Record a few Arabic and English voice notes (15: 10 Egyptian Arabic, 5 English; Step 1.6)
+- [x] Test Whisper on Egyptian Arabic early (top risk in the brief): best 80% usable < 85% target → `large-v3` + always confirm the transcript (Step 1.6, `eval/reports/whisper_phase1.md`)
 - [ ] List the required fields
 
 **Backend & Memory**
@@ -323,6 +331,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 
 **LLM & Speech**
 - [ ] Turn STT and extraction into LangGraph nodes
+- [ ] Show the voice-note transcript; the user confirms or corrects it before extraction (Step 1.6 D11 A)
 - [ ] Build the confirmation summary
 - [ ] Handle edits like "no, it's building 5", and reply in the user's language
 
@@ -352,7 +361,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 **LLM & Speech**
 - [ ] Measure extraction completeness (target ≥ 90%) and transcription quality (target ≥ 85%)
 - [ ] Improve the prompts
-- [ ] Add the "please confirm this transcript" fallback for weak audio
+- [ ] Decide if clear audio can skip the transcript confirmation (D11 B: needs a confidence signal that predicts mistakes; see the Whisper report)
 
 **Backend & Memory**
 - [ ] Measure p95 reply time (target < 5 s) and speed up slow parts
@@ -375,6 +384,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 **LLM & Speech**
 - [ ] Fix prompt versions; set timeouts and rate-limit retries
 - [ ] Confirm no personal data appears in traces
+- [ ] Re-measure Whisper `large-v3` speed on the server CPU; switch to `medium` if it is too slow (Step 1.6 D10 A)
 
 **Backend & Memory**
 - [ ] Switch to webhook mode and add a health-check endpoint
@@ -453,6 +463,17 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-25 | Voice notes are saved only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, JSON list) (D2 A). Empty = nobody's. Anyone else gets "not available", and nothing is downloaded | The bot is public, and Step 1.6 sends `eval/voice/raw/` to Groq: a stranger's real voice must never get there (section 9). Real IDs only in `.env`, never in the repo |
 | 2026-10-25 | Audio is saved to disk only for our own test recordings with fake data; the real flow (Phase 3) transcribes in memory and keeps no audio. The whole folder `eval/voice/raw/` is git-ignored, not only audio file types | Voice notes are personal data (section 9); the repo is public and git never forgets |
 | 2026-10-25 | Handlers get paths and settings through aiogram workflow data (`dp["voice_dir"]`, dependency injection); settings are read only in `main()`. `build_dispatcher()` sets it up, and one test checks the wiring in CI (Momo: "do your recommendation") | One place reads settings; tests pass a temporary folder. Phase 3 will inject more values (Redis, DB), so a name mismatch must fail in CI, not live. Duplicate check by `file_unique_id` and content type in the middleware log: not now |
+| 2026-10-26 | Step 1.6 follows `docs/prompts/phase1.md` (self-hosted faster-whisper in 4 sizes, Groq only as a comparison), not an older pasted version that tested only the Groq API (D1 A) | Matches the brief ("self-hosted", "test Whisper sizes early") and the 2026-10-25 decision; gives CPU numbers to choose a size |
+| 2026-10-26 | `eval/voice/reference.csv` uses Momo's columns: `id, file_name, language, noise, text, expected_compound/building/unit/name/phone, expected_category, notes` (D2) | The `expected_*` columns let the script check each number exactly |
+| 2026-10-26 | "Usable for extraction" = the problem is clear AND compound, building and unit are right (if said; digits or words). Phone scored apart; names not scored (D3 B). A unit letter written as ب stuck to the number counts (Momo, V07) | Rule fixed before seeing results; the bot confirms details with the user anyway |
+| 2026-10-27 | `faster-whisper` in main dependencies, `groq` in the `dev` group (D4 A). Whisper models go to the git-ignored `models/whisper/` on D:, through the new optional setting `STT_MODEL_DIR` (a relative path starts at the project root) (D5 A) | `stt.py` needs faster-whisper in Phase 2; groq is only for the comparison now. C: was 96% full; the 4 models take 6.7 GB |
+| 2026-10-27 | Whisper tests run on 4 CPU threads (D6 A) | Like the 4-core free server; the laptop has 8 |
+| 2026-10-27 | `pyproject.toml`: `[tool.uv] constraint-dependencies = ["av<19"]` (D7 A) | faster-whisper 1.2.1 calls `av.open(metadata_errors=...)`, which av 19 removed. Remove the line when a faster-whisper release works with av 19 |
+| 2026-10-27 | Our own `with_retry()` for HTTP 429: wait `retry-after`, else 2/4/8/16 s, at most 5 tries, only 429; the SDK's retry is off (D8 A) | Visible in the logs and testable with a fake `sleep`; Phase 2 `llm.py` needs the same. Seen live: Groq free tier = 20 requests per minute, `retry-after: 3` |
+| 2026-10-27 | Claude judges each different transcript first with a reason; Momo reviews the Arabic ones and decides (D9 A). Judgments in `eval/voice/judgments.csv` | Fast; Momo is the native speaker. An LLM judge can be wrong, so a human checks |
+| 2026-10-27 | STT model: local `large-v3`, int8, CPU (D10 A). Backup: `medium` if the server is too slow (re-measure in Phase 5) | 80% usable Arabic (same as medium and Groq; target 85% not met), the only local model that kept the problem in 10/10 notes, best CER (0.24), language 15/15. Cost: about 21 s (language set) / 28 s (auto) for a 25 s note on 4 laptop threads |
+| 2026-10-27 | Always show the transcript of a voice note; the user confirms or corrects it before extraction (D11 A) | The brief's fallback. No model reached 85%; the typical mistakes (a unit letter, one digit, a lost word like "gas") take a person seconds to spot |
+| 2026-10-27 | All of `eval/voice/` is git-ignored: voice notes, reference, results, scores, judgments, review (D12 A). Only the scripts, tests and the report (phones masked) are committed | Momo's words and fake phone numbers must not stay in a public repo forever |
 
 ## 14. Open decisions (decide, then move to the log)
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
@@ -460,7 +481,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - Classifier v2: SetFit or multilingual BERT.
 - Final hosting: Oracle VM or Azure Container Apps free grant.
 - Value of N for conversation history, and the token budget per LLM call.
-- Whisper model size (`small` / `medium` / `large-v3` / `large-v3-turbo`): decide from Step 1.6 measurements on CPU. Laptop: i7-11800H 8 cores, 16 GB RAM, RTX 3050 4 GB.
+- How the bot knows a voice note's language: auto-detect (costs +35–45% time with `large-v3`) or a hint, e.g. the language of the user's last text (Phase 2, `stt.py`). Step 1.6's "language set" used the answer from `reference.csv`, which the bot won't have.
 - One Telegram bot for everything, or a separate dev bot and demo/prod bot (decide before Phase 5: webhook and polling can't share one bot). Never write the bot's username or IDs in this public repo.
 
 ---
@@ -527,3 +548,11 @@ Format:
 - Status: ✅ pytest 26 passed, ruff clean; 3 deliberate breaks (no file cleanup, no allowlist, wrong `dp` key) were caught by the right tests. Live: `001` (2.65 s) and `003` (Arabic, 20.87 s) are valid OGG/Opus (all page CRCs OK), Momo played them, not in `git status`. Duplicates explained, not bugs: one note sent twice (`002`); 2 notes sent while the bot was off arrived together (`004`, 44 ms after `003`; the name reservation worked). Copies deleted with Momo's OK.
 - Known issues / TODO: The same note sent twice is saved twice (no check of `file_unique_id`). `001` and `003` are not part of Step 1.6's 15 recordings (Momo's choice): all 15 are recorded new; both files deleted with Momo's OK, so `eval/voice/raw/` is empty. Closes 1.4 TODOs: handler order is now tested; non-text messages get a reply. The 311 CSV had moved back to the repo root (Oct 25, 16:41, not by Claude); moved to `ml/data/raw/` again with Momo's OK.
 - What Momo did: chose D1 A, D2 A and bilingual replies; found the user ID in the bot's log and set `VOICE_SAVE_USER_IDS` in `.env`; ran the live test and played the files; explained the duplicates; approved the CSV move and deleting `002`/`004`.
+
+### Step 1.6 — Early Whisper test on Egyptian Arabic (2026-10-26 → 2026-10-27)
+- Phase · role: Phase 1 · LLM & Speech
+- Files: `eval/whisper_test.py`, `eval/score_whisper.py`, `tests/test_whisper_test.py`, `tests/test_score_whisper.py`, `eval/reports/whisper_phase1.md` (new); `app/config.py` + `tests/test_config.py` + `.env.example` (`STT_MODEL_DIR`, `STT_MODEL=large-v3`); `pyproject.toml` + `uv.lock` (faster-whisper 1.2.1, groq 1.7.0 dev, `av<19`); `.gitignore` (`models/`, all of `eval/voice/`). Git-ignored: 15 voice notes, reference/results/scores/judgments CSVs, `review.md`, 6.7 GB of models.
+- How it works: `whisper_test` transcribes the 15 notes (10 ar, 5 en, 342 s) with 4 local sizes (int8, 4 threads) and Groq large-v3, with language auto and set: 150 rows, written one by one (resume), 429 retry. `score_whisper` computes WER/CER and digit checks and joins the judgments (rule D3 B) into one summary table.
+- Status: ⚠️ works with issues. pytest 59 passed, ruff clean, 6 deliberate breaks caught by the right tests; full CPU run (about 28 min of transcription + 39 min of model downloads) and Groq run done (10 live 429s, all recovered). Result: best usable Arabic 80% (medium, large-v3, Groq) < 85% target → D10 A + fallback D11 A. Issues: the 31 Arabic judgments of the large models are Claude's only (not reviewed by Momo); each Arabic note = 10 points; `set` uses the oracle language; WER is too pessimistic (numbers in words, fillers, reference ≠ audio in V02/V07/V10).
+- Known issues / TODO: Momo sets `STT_MODEL=large-v3` in `.env`. Re-measure speed on the server (Phase 5). Parked second-round ideas (report section 11: scoring normalization, VAD, initial_prompt, float32, forced `ar`, Egyptian fine-tunes, Cohere) → stretch list in Step 1.12. `MAdel121/whisper-medium-egy` checked (card only): SpeechBrain mid-training checkpoint, dataset without license, not usable.
+- What Momo did: got the Groq + Gemini keys; recorded 15 notes full of hard cases and wrote `reference.csv`; chose D1 A, D2 (own format), D3 B, D4–D9 A, D10 A, D11 A, D12 A; reviewed 21 Arabic judgments (changed V05); listened to V11/V12/V15 (the reference was right: model errors).
