@@ -116,8 +116,8 @@ app/
   memory/            # Redis session store
   db/                # SQLAlchemy models, session, repositories
   schemas/           # Pydantic models
-ml/                  # data prep (sample_311.py), train_baseline.py, train_setfit.py
-  data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample
+ml/                  # data prep (sample_311.py, label_mapping.py, prepare_311.py), train_baseline.py, train_setfit.py
+  data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample; processed/ holds 311_mapped.csv (Step 1.8)
   notebooks/         # EDA notebooks, saved with outputs (01_explore_311.ipynb)
 eval/                # test_set.csv, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py
   voice/             # git-ignored, the whole folder: raw/ (test voice notes saved by the bot),
@@ -140,6 +140,7 @@ Exists since Step 1.4: `app/bot/handlers.py` (Router: `/start` + echo), `app/bot
 Exists since Step 1.5: `app/bot/voice_files.py` (folder + file names for test voice notes), `tests/test_voice_files.py`, `tests/test_polling.py`. `handlers.py` also has `save_voice` and the catch-all `unsupported`; `polling.py` has `build_dispatcher()`. The bot creates `eval/voice/raw/` on the first saved voice note.
 Exists since Step 1.6: `eval/whisper_test.py` (transcribe the test notes: local models + Groq), `eval/score_whisper.py` (WER/CER, number checks, judgments → summary), `tests/test_whisper_test.py`, `tests/test_score_whisper.py`, `eval/reports/whisper_phase1.md`. `config.py` has `stt_model_dir`.
 Exists since Step 1.7: `ml/sample_311.py` (HPD sample + full counts from the local 311 export), `tests/test_sample_311.py`, `ml/notebooks/01_explore_311.ipynb`. Git-ignored outputs: `ml/data/raw/311_hpd_sample.csv`, `ml/data/raw/311_hpd_population_counts.csv`.
+Exists since Step 1.8: `ml/label_mapping.py` (the 311 → category + urgency rules, one place), `ml/prepare_311.py`, `tests/test_label_mapping.py`, `tests/test_prepare_311.py`, `docs/labeling_guide.md` (the same rules in words; change both together). Git-ignored output: `ml/data/processed/311_mapped.csv`.
 
 ---
 
@@ -168,6 +169,7 @@ uv run python -m eval.whisper_test        # Step 1.6 Whisper test: local models,
 uv run python -m eval.whisper_test --engine local --models small   # one engine / model only   ✅ works (Step 1.6)
 uv run python -m eval.score_whisper       # score results.csv → scores.csv, review.md + summary table   ✅ works (Step 1.6)
 uv run python -m ml.sample_311            # Step 1.7: read the 16 GB 311 export → HPD sample + full counts in ml/data/raw/ (about 3 min)   ✅ works (Step 1.7)
+uv run python -m ml.prepare_311           # Step 1.8: label the 311 sample → ml/data/processed/311_mapped.csv + counts per category/urgency (about 2 s)   ✅ works (Step 1.8)
 uv run jupyter nbconvert --to notebook --execute --inplace ml/notebooks/01_explore_311.ipynb   # run a notebook, outputs saved in the file (or VS Code: kernel .venv, Run All)   ✅ works (Step 1.7)
 docker compose up -d metabase             # http://localhost:3000
 ```
@@ -192,8 +194,8 @@ Note: Momo's terminal uses code page cp1252 and cannot print Arabic. Scripts wri
 | `predictions` | id, sr_id, model_name, model_version, category, urgency, confidence, needs_review, created_at |
 
 **Labels:**
-- Categories: `plumbing`, `electricity`, `ac`, `carpentry`, `pest_control`, `general`.
-- Urgency: `low`, `medium`, `high`. Rules are defined in `docs/labeling_guide.md`.
+- Categories (8): `plumbing`, `electricity`, `ac`, `carpentry`, `pest_control`, `gas`, `appliances`, `general`. The brief lists 6; `gas` and `appliances` were added in Step 1.8 (D5/D6 B, instructor approval pending). `ac` = cooling + heating + ventilation, with a sub-label.
+- Urgency: `low`, `medium`, `high`. Rules are defined in `docs/labeling_guide.md` (words) and `ml/label_mapping.py` (the 311 rules as code).
 
 ---
 
@@ -275,8 +277,8 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 
 **Data & ML**
 - [x] Download the NYC 311 data and keep only housing complaints (Momo's export, filtered to HPD by `ml/sample_311.py`; explored in Step 1.7)
-- [ ] Map complaint types to the 6 categories and an urgency level
-- [ ] Write `docs/labeling_guide.md`
+- [x] Map complaint types to the categories and an urgency level (8 categories: the brief's 6 + gas, appliances; `ml/label_mapping.py`, Step 1.8)
+- [x] Write `docs/labeling_guide.md` (Step 1.8)
 - [ ] Start `docs/data_card.md`
 
 **LLM & Speech**
@@ -482,10 +484,19 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-27 | Sample: agency `HPD`, 2025-10-01 ≤ created < 2026-10-01, `unique_key` ends in 7 (about 10%), at most 100,000 rows; plus counts of ALL rows in the window per (type, descriptor, details) (D2 A) | Spread over the whole year: heat is seasonal (62% of January, 7% of August). The full counts prove the sample is fair (≤ 0.08 points off per type) |
 | 2026-10-27 | Keep 14 columns, saved with API names and ISO 8601 dates; no addresses or coordinates (D3 A) | Data minimization; stable names if the website renames columns again (it did: "Problem (formerly Complaint Type)") |
 | 2026-10-27 | pandas, ipykernel, nbconvert, matplotlib in the `dev` group (D4 A). Notebooks are committed with their outputs (counts and charts only) | Only ML work needs them, not the bot. The instructor can read results on GitHub. Revisit the groups when scikit-learn comes (Phase 2) |
+| 2026-10-27 | **8 categories:** the brief's 6 + `gas` and `appliances` (Step 1.8 D5/D6 B). ⚠️ Differs from the brief (user flow step 6); instructor approval pending. Tie rule: gas that doesn't reach the cooker → `gas`; the cooker itself or an unknown cause → `appliances`; the water heater → `plumbing` | Momo: gas is a safety problem that needs its own category; appliances are their own trade. Cost: 311 has 0 gas-smell rows, gas is 1.2% of the sample, more classes make macro F1 harder. Going back = `ml/label_mapping.py` + its test + the guide |
+| 2026-10-27 | `ac` = cooling + heating + ventilation (D1 A). New column `subcategory` (ac only: `heating`, `ventilation`; `cooling` comes from Phase 2). Phase 2 synthetic `ac` mix: 70% cooling / 20% heating / 10% ventilation. 311 "no heat" → `ac`, "no hot water" → `plumbing`, both in one row → dropped | Egyptian split units also heat. NYC has 0 cooling rows: 97.7% of the sample's `ac` rows are heating. Cooling seeds are in the guide (§7) |
+| 2026-10-27 | Doors, windows, glass, locks, cabinets → `carpentry` (D2 A). Floors, tiles, stairs → `general` (D3 A). Mold → `general`, or `plumbing` if the message names a leak as the cause (D4 A). Small rows as proposed (D7): intercom, smoke/CO detectors → `electricity`; sprinkler → `plumbing`; window guard, elevator, outside, mailbox, garbage → `general` | One simple rule per trade; Egyptian floors are mostly tiles; residents rarely know the cause of mold |
+| 2026-10-27 | Dropped 311 rows, with a reason: `two_categories` (no heat + no hot water), `not_in_egypt` (radiators, steam pipes, boilers, fire escapes, dumbwaiters, radiator paint), `not_maintenance` (signage, janitor), `bad_row`. 12.1% of the year | They don't exist in Egyptian compounds, or there is nothing to repair |
+| 2026-10-27 | **Urgency rules** (moved from section 14). `high` = danger now, or a basic service (water or electricity for the whole unit) completely gone; `medium` = something important doesn't work; `low` = cosmetic or small. Always high: gas smell, sparks/smoke/burning smell, water on electricity, flooding, no water at all, no power in the whole unit, sewage, falling ceiling, fall risks. Only the problem decides: no extra level for who lives there or the season (D8 A). A 311 row that mixes two levels gets the higher one. Gas urgency: 3 levels, gas smell always `high` (D5 a) | Consistent and learnable from the words. Person or season modifiers (D8 B) are hard to label the same way twice |
+| 2026-10-27 | Urgency labels come from rules on the 311 tree now (weak labels), from label-first synthetic messages in Phase 2, and from Momo's hand labels for the test set (D9 A) | Free and consistent. LLM labels would make the Phase 4 ML-vs-LLM comparison circular. HPD's own emergency field (dataset `ygpa-z7cr`) was not verified |
+| 2026-10-27 | Two problems in one message → one SR: the category of the most urgent problem (tie: the first one mentioned), the highest urgency (D10 A) | Simple; the bot can ask for the second problem as a new request (Phase 3) |
+| 2026-10-27 | `ml/label_mapping.py` design: a default per complaint type + exceptions; the most specific rule wins; `GENERAL` and `SAFETY` have no default; a problem with no rule stops `prepare_311` and no file is written | A new complaint type in a newer export never gets a label by accident |
 
 ## 14. Open decisions (decide, then move to the log)
+- Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
+- Which F1 the brief's "≥ 0.85" means: macro (every class counts the same) or weighted (by class size). Ask the instructor; with 8 unbalanced classes the two can differ a lot.
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
-- Exact urgency rules (`low`/`medium`/`high`), to be defined in the labeling guide.
 - Classifier v2: SetFit or multilingual BERT.
 - Final hosting: Oracle VM or Azure Container Apps free grant.
 - Value of N for conversation history, and the token budget per LLM call.
@@ -574,3 +585,11 @@ Format:
 - Status: ✅ script run: 0 bad rows, sample 90,405, no cap. pytest 64 passed (5 new), 2 deliberate breaks caught by the right tests, ruff clean (notebook included), notebook ran with 0 errors, sample within 0.08 points of the population for every type, data files not in `git status`.
 - Known issues / TODO: for Step 1.8: no air conditioning in HPD data (closest: GENERAL / VENTILATION SYSTEM, 4,722); heat (39.7%) has no category of its own; one odd row `Safety/Safety/Safety`. The terms quotes come from copies (the live page blocks tools: 403/404); Momo checks them in a browser. Missing data checked only for our 14 columns. Decide in Step 1.12 whether to keep the 16 GB export.
 - What Momo did: chose D1 B (local export, not the API), D2 A, D3 A, D4 A; approved the section 12 tick.
+
+### Step 1.8 — Category and urgency mapping + labeling guide (2026-10-27)
+- Phase · role: Phase 1 · Data & ML
+- Files: `ml/label_mapping.py`, `ml/prepare_311.py`, `tests/test_label_mapping.py`, `tests/test_prepare_311.py`, `docs/labeling_guide.md` (new); CLAUDE.md sections 5, 6, 7, 12, 13, 14. Git-ignored: `ml/data/processed/311_mapped.csv` (79,544 rows, 8 columns).
+- How it works: `label_mapping.py` has 75 rules (a default per complaint type + exceptions; the most specific wins) that turn a 311 problem into `Label(category, urgency, subcategory)` or `Drop(reason)`. `prepare_311` applies them to the 90,405-row sample, writes the kept rows (`.part` → rename) and prints counts; a problem with no rule stops it, and no file is written. The guide has the same rules in words, edge cases, EN + Egyptian Arabic examples and the Phase 2 seed lists (AC cooling, gas).
+- Status: ✅ all 174 groups of the year mapped (0 unmapped, 0 rule ties, all 75 rules used); sample: 79,544 kept, 10,861 dropped, every share within 0.1 points of the full year. pytest 92 passed (28 new), ruff clean, 6 deliberate breaks caught by the right tests. Sample: ac 27.3% (97.7% heating), plumbing 23.2, general 21.0, pest_control 9.1, carpentry 7.8, electricity 7.0, appliances 3.3, gas 1.2; urgency medium 70.3 / low 20.6 / high 9.2.
+- Known issues / TODO: 8 categories ≠ the brief's 6: instructor approval pending (section 14). 311 has no resident text, no cooling and no gas-smell rows: they come from Phase 2 synthetic data. Urgency labels are weak (one per problem group). The guide's Arabic is not yet checked by Momo. Which F1 (macro or weighted) → section 14. For the Step 1.12 stretch list: a safety tip in the bot's reply (gas smell), D8 B modifiers (baby, season), D10 C (two SRs from one message), D1 C (a real AC dataset).
+- What Momo did: chose D1 A (+ fix the AC imbalance), D2–D4 A, D5/D6 B (8 categories) + gas urgency a, D7 (table as shown), D8–D10 A; confirmed the 5 build choices (D7 rows, cooker tie rule, window guard, mixed row → higher level, 70/20/10) and the guide's 6 points.
