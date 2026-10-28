@@ -99,7 +99,7 @@ Resident ⇄ Telegram ⇄ aiogram ⇄ FastAPI ⇄ LangGraph flow
 - `/reset`: clear the session.
 - `/forget`: delete the saved profile.
 
-**Required fields:** compound, building, unit_number, name, phone, issue_description.
+**Required fields:** compound, building, unit_number, name, phone, issue_description. Rules and follow-up questions: `docs/design_notes.md` §1.
 
 ---
 
@@ -126,7 +126,7 @@ eval/                # test_set.csv, run_eval.py, ml_vs_llm.py, whisper_test.py,
   reports/           # whisper_phase1.md (Step 1.6)
 models/              # downloaded Whisper models, about 6.7 GB (git-ignored; STT_MODEL_DIR)
 migrations/          # Alembic
-docs/                # project_brief, data_card.md, labeling_guide.md, model_report.md
+docs/                # project_brief, data_card.md, labeling_guide.md, design_notes.md, model_report.md
   prompts/           # step-by-step prompts for each phase (phase1.md, ...)
 tests/
 .github/workflows/ci.yml   # exists since Step 1.3: ruff check, ruff format --check, pytest
@@ -144,6 +144,7 @@ Exists since Step 1.7: `ml/sample_311.py` (HPD sample + full counts from the loc
 Exists since Step 1.8: `ml/label_mapping.py` (the 311 → category + urgency rules, one place), `ml/prepare_311.py`, `tests/test_label_mapping.py`, `tests/test_prepare_311.py`, `docs/labeling_guide.md` (the same rules in words; change both together). Git-ignored output: `ml/data/processed/311_mapped.csv`.
 Exists since Step 1.9: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py` (the recipe: seed 42, 4 fictional compounds, buildings A–F), `app/db/seed/units.csv` (committed; made only by the script, never by hand; columns `compound_en, compound_ar, building, unit_number`; 188 rows), `tests/test_generate_units.py` (golden-file test: the CSV = a fresh run).
 Exists since Step 1.10: `docs/data_card.md` (every data source: terms, how it was made, intended use, limits; 3 in use + 3 planned; a new source gets its section before it is used).
+Exists since Step 1.11: `docs/design_notes.md` (the Phase 2 plan: §1 the 6 required fields with rules and bot questions, §2 the database sketch with the ER diagram, §3 the dashboard charts). Phase 2 code follows it; change it in the same commit when the code needs a change.
 
 ---
 
@@ -187,17 +188,20 @@ Note: Momo's terminal uses code page cp1252 and cannot print Arabic. Scripts wri
 
 ---
 
-## 7. Data model (first version)
+## 7. Data model (Step 1.11)
+Summary only. Types, every CHECK rule, ON DELETE rules, indexes and the ER diagram: `docs/design_notes.md` §2.
 | Table | Columns |
 |---|---|
-| `users` | id, telegram_user_id (unique), name, phone, created_at |
-| `units` | id, compound, building, unit_number; unique(compound, building, unit_number) |
-| `user_units` | user_id, unit_id, confirmed_at |
-| `service_requests` | id, ticket_no (unique), user_id, unit_id, description, language, category, urgency, status (open / in_progress / closed), created_at, closed_at |
-| `messages` | id, sr_id (nullable), telegram_chat_id, role, text, created_at |
-| `predictions` | id, sr_id, model_name, model_version, category, urgency, confidence, needs_review, created_at |
+| `compounds` | id, name_en (unique), name_ar (unique) |
+| `units` | id, compound_id → compounds, building (`A`–`F`), unit_number (`B-201`, first letter = building); unique(compound_id, unit_number) |
+| `users` | id, telegram_user_id (unique, bigint), name, phone (E.164), created_at |
+| `user_units` | user_id → users, unit_id → units, confirmed_at; PK (user_id, unit_id) |
+| `service_requests` | id (identity BY DEFAULT), ticket_no (unique, `SR-YYYYMMDD-NNNN`), user_id → users (empty after `/forget`), unit_id → units, description, language (`ar` / `en`), category, subcategory (`ac` only), urgency, status (open / in_progress / closed), created_at, closed_at (set only when closed) |
+| `predictions` | id, sr_id → service_requests, model_name, model_version, category, category_confidence, subcategory, urgency, urgency_confidence, needs_review, created_at; unique(sr_id, model_name, model_version) |
+| `messages` | id, telegram_chat_id (bigint), sr_id → service_requests (nullable), role (`user` / `bot`), text, created_at |
 
-`units` gets its rows from the mock registry `app/db/seed/units.csv` (Step 1.9), which has two compound names (`compound_en`, `compound_ar`). How the table stores them: section 14.
+`compounds` and `units` get their rows from the mock registry `app/db/seed/units.csv` (Step 1.9).
+Metabase reads only `compounds`, `units`, `predictions` and the view `dashboard_service_requests` (= `service_requests` without `description` and `user_id`), as the read-only user `metabase_reader`.
 
 **Labels:**
 - Categories (8): `plumbing`, `electricity`, `ac`, `carpentry`, `pest_control`, `gas`, `appliances`, `general`. The brief lists 6; `gas` and `appliances` were added in Step 1.8 (D5/D6 B, instructor approval pending). `ac` = cooling + heating + ventilation, with a sub-label.
@@ -291,20 +295,20 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [x] Get Groq and Gemini API keys
 - [x] Record a few Arabic and English voice notes (15: 10 Egyptian Arabic, 5 English; Step 1.6)
 - [x] Test Whisper on Egyptian Arabic early (top risk in the brief): best 80% usable < 85% target → `large-v3` + always confirm the transcript (Step 1.6, `eval/reports/whisper_phase1.md`)
-- [ ] List the required fields
+- [x] List the required fields (type, examples, rule, follow-up question for each; `docs/design_notes.md` §1, Step 1.11)
 
 **Backend & Memory**
 - [x] Create the bot with @BotFather
 - [x] Set up the repo structure and `.env` config
 - [x] Build a polling bot that receives text and voice (text ✅ Step 1.4; voice ✅ Step 1.5)
 - [x] Generate the mock unit registry (4 fictional compounds, 188 units, seed 42; `app/db/seed/`, Step 1.9)
-- [ ] Sketch the DB tables on paper
+- [x] Sketch the DB tables on paper (7 tables + ER diagram, tested in Postgres with ROLLBACK; `docs/design_notes.md` §2, Step 1.11)
 
 **Dashboard & DevOps**
 - [x] Set up the GitHub repo and install Rancher Desktop
 - [x] Write a docker compose file with Postgres and Redis
 - [x] Create a first GitHub Actions workflow (ruff + pytest)
-- [ ] List the dashboard charts the brief asks for
+- [x] List the dashboard charts the brief asks for (5 charts: columns, SQL idea, what to store; `docs/design_notes.md` §3, Step 1.11)
 
 **End of phase:** the bot replies, the data is mapped, and the scope is frozen. New ideas go on a stretch list.
 
@@ -505,12 +509,22 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-28 | Data card format (Step 1.10 D1 A): a summary table + the same 8 parts per source (status, source, terms, how it was made, size and columns, where it is stored, intended use, not for) + a limits table; planned sources get a "To fill in" list. A new source gets its section before it is used; unclear terms → not used | Easy to compare sources, about 2–3 screens each. The full "Datasheets for Datasets" list (about 50 questions) is too long and fits synthetic data badly |
 | 2026-10-28 | The data card holds the key numbers and links to the labeling guide and the Whisper report for details (D2 A) | The reader gets the main facts; big tables stay in one place, so two copies can't drift apart |
 | 2026-10-28 | No license for our own data yet (D3 A). The repo has no `LICENSE` file, which means "all rights reserved" by default | Intern work may belong to Emaar; the instructor decides if and how it is licensed (section 14) |
+| 2026-10-28 | Field rules (Step 1.11, `docs/design_notes.md` §1): the LLM copies values out of the message; Python cleans and checks them (registry, phone, name). Missing = `null`, never a guess | An LLM can invent a unit; the registry can't. One place for every rule |
+| 2026-10-28 | Phone: any country (D1 C), stored as E.164 (`+201XXXXXXXXX`). Without `+`: only an Egyptian mobile (11 digits, 010/011/012/015) is accepted and gets `+20`. Egypt (`+20`): mobile only, landlines refused. Other countries: shape only (`+`, 7–15 digits); the DB has the same shape CHECK | Momo's choice: owners with a foreign number can register. One stored format makes numbers comparable. A full per-country check needs `phonenumbers` (section 14) |
+| 2026-10-28 | Name: full name (D2 B): at least 2 words, 3–80 characters, Arabic or Latin letters, spaces, `-` `'` `.`; no digits; saved as written | Momo's choice; closer to a real CRM. Cost: one more question for users who give one name. Known limit: "عبد الله" passes |
+| 2026-10-28 | Unit: strict registry (D3 A): compound + building + unit must be one registry row, else the bot says "not found" and shows the valid buildings | Every SR points to a real unit (`unit_id` NOT NULL), so "top units" stays clean. The mock registry is complete by definition |
+| 2026-10-28 | Follow-up questions in 3 groups, only for what is missing (D4 B): problem → unit (compound + building + unit) → contact (name + phone). Arabic questions say "محتاجين" instead of "you" verbs. Building letters أ ب ج د هـ → A–E (checked by Momo); و is not used. After 3 wrong answers the bot mentions `/reset` | At most 3 questions; people say the unit parts together. Male and female "you" verbs differ in Arabic. و also means "and" |
+| 2026-10-28 | **Ticket number** (D5 B): `SR-YYYYMMDD-NNNN` = the Cairo date of `created_at` + the SR's `id` (no daily restart), at least 4 digits (`f"{id:04d}"`; plain SQL `lpad` would cut `10342`). Numbers can skip. `/status` shows only the user's own SRs; others get "not found". Closes section 14 | The DB sequence makes it unique (no race condition), and the date stays readable. The ownership check, not the number, protects privacy |
+| 2026-10-28 | Compound names in a `compounds` table (id, name_en, name_ar, both UNIQUE); `units.compound_id` points to it (D6 B). `units.building` is kept next to `unit_number`, with a CHECK that they agree. Closes section 14 | Normalization: each name stored once, and the database itself blocks a second spelling. The building copy makes "top buildings" easy |
+| 2026-10-28 | `predictions`: one row per SR per model run with `category_confidence` and `urgency_confidence` + `subcategory` (D7 A); `service_requests` gets `subcategory` too | Simple queries, and we can see which answer was unsure. Section 7 had one confidence for two answers and no `subcategory` (Step 1.8) |
+| 2026-10-28 | `/forget` (D8 C), one transaction, in this order: SR descriptions → `[deleted]`; delete `messages` by chat ID; delete the `users` row (→ `user_units` CASCADE, `service_requests.user_id` SET NULL); delete the Redis keys. The bot asks first and warns about open SRs | The dashboard numbers stay right, and nothing with the person's name, phone or words is left. Step 1 must come before step 3 |
+| 2026-10-28 | SR status history: only `status` + `closed_at` (D9 A) | Enough for all 5 charts in the brief, "open over time" included. `in_progress_at` (D9 B) and a history table (D9 C) → stretch list |
+| 2026-10-28 | Metabase (D10 A): own read-only user `metabase_reader` that can read `compounds`, `units`, `predictions` and the view `dashboard_service_requests` (no `description`, no `user_id`); not `users`, `messages`, `user_units`. Report time zone `Africa/Cairo` | Section 9: names, phones and message texts can never appear on the dashboard. Tested: the role was denied |
+| 2026-10-28 | Smaller DB rules (Momo accepted): a `users` row is made at the first "yes", not at `/start`; `messages` has no `user_id` (found by chat ID); labels are `text` + CHECK, not ENUM; times are `timestamptz` (UTC); Telegram IDs are `bigint`; FK indexes added by hand, but not `predictions (sr_id)` (the UNIQUE index covers it); `service_requests.id` is identity BY DEFAULT, so the app can insert the id it took for the ticket | Store nobody who only says hello; a CHECK is easier to change in a migration than an ENUM; Telegram IDs can be bigger than an integer holds; Postgres doesn't index FKs by itself. Found or confirmed in check C1 |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
 - Which F1 the brief's "≥ 0.85" means: macro (every class counts the same) or weighted (by class size). Ask the instructor; with 8 unbalanced classes the two can differ a lot.
-- Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
-- How the DB stores a compound's two names (the registry has `compound_en` + `compound_ar`): two columns in `units`, or a `compounds` table (id, name_en, name_ar) that `units` points to. Decide in the Step 1.11 DB sketch.
 - Classifier v2: SetFit or multilingual BERT.
 - Final hosting: Oracle VM or Azure Container Apps free grant.
 - Value of N for conversation history, and the token budget per LLM call.
@@ -520,6 +534,9 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - Which LLM writes the synthetic data and the translations (Phase 2). Its license decides what we may do with the outputs (data card §6: Llama 3.1+ → a model trained on its outputs and "made available" must be named "Llama…"; gpt-oss → Apache 2.0; Gemini free tier → no competing models, Google may read what we send). Use a different model for the ML vs LLM zero-shot comparison, or say it clearly in the report (circular comparison).
 - Whether the synthetic data and `eval/test_set.csv` go into git (Phase 2). Public = reproducible, but anyone (and future LLM training crawls) can read the test answers.
 - Whether a second person labels a part of the test set, to measure agreement (Phase 2).
+- Phone check for non-Egyptian numbers (Phase 2, D1 C): add the `phonenumbers` library (new dependency, Apache 2.0) for the real per-country length, or keep the shape check only.
+- How long to keep `messages` of conversations that never became an SR (`/reset`, 30 min idle). Message text is personal data (section 9). Decide before Phase 3 saves messages.
+- Who changes an SR's status, and how: there is no staff screen (technicians are out of scope). Idea: a demo script that closes some SRs with made-up times (Phase 4 or 6); the demo must say they are invented.
 
 ---
 
@@ -627,3 +644,11 @@ Format:
 - Status: ✅ every number checked against its source (file sizes, row counts, headers, label counts); 23 links, 0 broken; 0 phone-like numbers; data paths still git-ignored; ruff clean, pytest 102 passed (no code changed). v1 committed (`6dd39ab`, `cb48a56`), CI green. NYC terms checked by Momo on the official site (codelibrary.amlegal.com, Title 23, Chapter 5): §23-504(a) matched; §23-502(d) did NOT match the unofficial copy (older wording with "registration requirement, license requirement"), so card v1.1 quotes the official text. The LLM license notes come partly from web search summaries (the card says "for planning, not legal advice").
 - Known issues / TODO: §23-502(d) lets the city ask anyone who shares the data, or an app built on it, to name the source, version and changes; the card now says we do that. Step 1.7's FAQ quote ("no restrictions on the use of Open Data") was not found live (the FAQ URL now redirects to a user guide); the card quotes the law (§23-502(d), §23-504(a)) instead. Found: the voice notes use compounds that are not in the registry (Cedar Park, Lotus Ridge, Nakhla Residence) and category labels from before the guide (2 × `?`, 1 × `plumbing+electricity`). Corrected: `HEAT/HOT WATER` (not heat alone) is 39.7%; the 311 gas rows are 966 "cooking gas shut off" + 8 "no gas".
 - What Momo did: chose D0 A (commit Step 1.9 first), D1 A, D2 A, D3 A; approved part 1 and part 2 of the card; checked §23-504(a) and §23-502(d) on the official site and found the outdated quote (the nyc.gov Terms of Use page has neither quote).
+
+### Step 1.11 — Design notes: required fields, database sketch, dashboard plan (2026-10-28)
+- Phase · role: Phase 1 · LLM & Speech, Backend & Memory, Dashboard & DevOps
+- Files: `docs/design_notes.md` (new: §1 fields, §2 database, §3 dashboard, change log); CLAUDE.md sections 4, 5, 7, 12, 13, 14. No code. Before the step: Step 1.10 committed and pushed (`bf12895`), tree clean.
+- How it works: §1 gives each of the 6 fields a type, EN + AR examples, cleanup, a validation rule, the follow-up question and the "invalid" reply, plus the question order and returning users. §2 has the Mermaid ER diagram and 7 tables with keys, CHECK and ON DELETE rules, the ticket format and the `/forget` steps. §3 maps the brief's 5 charts to columns, an SQL idea and what must be stored; Metabase reads a view without personal data.
+- Status: ✅ design tested (check C1) in the local Postgres 16.15, in one transaction that ended with ROLLBACK (no tables and no role before or after): all 188 registry units loaded through the CHECKs; 20/20 bad inserts refused; `metabase_reader` denied on `users`, `messages`, `service_requests`; the doc's own 7 SQL blocks (copied out by a script) gave the answers worked out by hand; `/forget` left 6 SRs on the dashboard. ruff clean, pytest 102 passed, 0 phone-like numbers. ⏸️ The Mermaid diagram is not yet seen drawn (no local tool; check on GitHub after the push).
+- Known issues / TODO: C1 found 5 fixes, all made in the doc (identity BY DEFAULT, the `lpad` cut, numbers skip, no `predictions (sr_id)` index, the phone CHECK). The C1 SQL lives only in Claude's scratchpad (not committed); Phase 2 tests the real models. Not tested: Metabase on the view, real LLM extraction, the Arabic cleanup rules (Phase 2–3). For the Step 1.12 stretch list: voice vs text SRs (needs a `source` column from the first SR), `needs_review` share, Arabic vs English chart, D9 B/C.
+- What Momo did: chose D1 C, D2 B, D3 A, D4 B, D5 B, D6 B, D7 A, D8 C, D9 A, D10 A and C1 yes; confirmed part 1 (Arabic questions, building letters, E.164 storage); accepted the 3 small DB proposals; started Rancher Desktop for C1; put voice vs text on the stretch list.
