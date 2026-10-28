@@ -115,6 +115,7 @@ app/
   prompts/           # prompt files (*.md), versioned; never inline long prompts
   memory/            # Redis session store
   db/                # SQLAlchemy models, session, repositories
+    seed/            # mock unit registry: generate_units.py + units.csv (committed; Step 1.9)
   schemas/           # Pydantic models
 ml/                  # data prep (sample_311.py, label_mapping.py, prepare_311.py), train_baseline.py, train_setfit.py
   data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample; processed/ holds 311_mapped.csv (Step 1.8)
@@ -141,6 +142,7 @@ Exists since Step 1.5: `app/bot/voice_files.py` (folder + file names for test vo
 Exists since Step 1.6: `eval/whisper_test.py` (transcribe the test notes: local models + Groq), `eval/score_whisper.py` (WER/CER, number checks, judgments → summary), `tests/test_whisper_test.py`, `tests/test_score_whisper.py`, `eval/reports/whisper_phase1.md`. `config.py` has `stt_model_dir`.
 Exists since Step 1.7: `ml/sample_311.py` (HPD sample + full counts from the local 311 export), `tests/test_sample_311.py`, `ml/notebooks/01_explore_311.ipynb`. Git-ignored outputs: `ml/data/raw/311_hpd_sample.csv`, `ml/data/raw/311_hpd_population_counts.csv`.
 Exists since Step 1.8: `ml/label_mapping.py` (the 311 → category + urgency rules, one place), `ml/prepare_311.py`, `tests/test_label_mapping.py`, `tests/test_prepare_311.py`, `docs/labeling_guide.md` (the same rules in words; change both together). Git-ignored output: `ml/data/processed/311_mapped.csv`.
+Exists since Step 1.9: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py` (the recipe: seed 42, 4 fictional compounds, buildings A–F), `app/db/seed/units.csv` (committed; made only by the script, never by hand; columns `compound_en, compound_ar, building, unit_number`; 188 rows), `tests/test_generate_units.py` (golden-file test: the CSV = a fresh run).
 
 ---
 
@@ -170,6 +172,7 @@ uv run python -m eval.whisper_test --engine local --models small   # one engine 
 uv run python -m eval.score_whisper       # score results.csv → scores.csv, review.md + summary table   ✅ works (Step 1.6)
 uv run python -m ml.sample_311            # Step 1.7: read the 16 GB 311 export → HPD sample + full counts in ml/data/raw/ (about 3 min)   ✅ works (Step 1.7)
 uv run python -m ml.prepare_311           # Step 1.8: label the 311 sample → ml/data/processed/311_mapped.csv + counts per category/urgency (about 2 s)   ✅ works (Step 1.8)
+uv run python -m app.db.seed.generate_units   # Step 1.9: make app/db/seed/units.csv (seed 42 → 188 units); commit the CSV if it changes   ✅ works (Step 1.9)
 uv run jupyter nbconvert --to notebook --execute --inplace ml/notebooks/01_explore_311.ipynb   # run a notebook, outputs saved in the file (or VS Code: kernel .venv, Run All)   ✅ works (Step 1.7)
 docker compose up -d metabase             # http://localhost:3000
 ```
@@ -192,6 +195,8 @@ Note: Momo's terminal uses code page cp1252 and cannot print Arabic. Scripts wri
 | `service_requests` | id, ticket_no (unique), user_id, unit_id, description, language, category, urgency, status (open / in_progress / closed), created_at, closed_at |
 | `messages` | id, sr_id (nullable), telegram_chat_id, role, text, created_at |
 | `predictions` | id, sr_id, model_name, model_version, category, urgency, confidence, needs_review, created_at |
+
+`units` gets its rows from the mock registry `app/db/seed/units.csv` (Step 1.9), which has two compound names (`compound_en`, `compound_ar`). How the table stores them: section 14.
 
 **Labels:**
 - Categories (8): `plumbing`, `electricity`, `ac`, `carpentry`, `pest_control`, `gas`, `appliances`, `general`. The brief lists 6; `gas` and `appliances` were added in Step 1.8 (D5/D6 B, instructor approval pending). `ac` = cooling + heating + ventilation, with a sub-label.
@@ -291,7 +296,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [x] Create the bot with @BotFather
 - [x] Set up the repo structure and `.env` config
 - [x] Build a polling bot that receives text and voice (text ✅ Step 1.4; voice ✅ Step 1.5)
-- [ ] Generate the mock unit registry
+- [x] Generate the mock unit registry (4 fictional compounds, 188 units, seed 42; `app/db/seed/`, Step 1.9)
 - [ ] Sketch the DB tables on paper
 
 **Dashboard & DevOps**
@@ -492,11 +497,16 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-27 | Urgency labels come from rules on the 311 tree now (weak labels), from label-first synthetic messages in Phase 2, and from Momo's hand labels for the test set (D9 A) | Free and consistent. LLM labels would make the Phase 4 ML-vs-LLM comparison circular. HPD's own emergency field (dataset `ygpa-z7cr`) was not verified |
 | 2026-10-27 | Two problems in one message → one SR: the category of the most urgent problem (tie: the first one mentioned), the highest urgency (D10 A) | Simple; the bot can ask for the second problem as a new request (Phase 3) |
 | 2026-10-27 | `ml/label_mapping.py` design: a default per complaint type + exceptions; the most specific rule wins; `GENERAL` and `SAFETY` have no default; a problem with no rule stops `prepare_311` and no file is written | A new complaint type in a newer export never gets a label by accident |
+| 2026-10-27 | Mock unit registry in `app/db/seed/`: `generate_units.py` + `units.csv` (Step 1.9 D1 A). The CSV is committed; a golden-file test checks that it equals a fresh run, value by value, not byte by byte (D2 A) | Next to the DB code that will load it; goes into the Docker image with the app. CI, Docker, Phase 3 and the instructor get it without running anything; any change shows in `git diff`. Safe in the public repo: 100% fictional. Bytes differ by OS (CRLF / LF) |
+| 2026-10-27 | Compounds (D3): Olive Ridge / أوليف ريدج, Juniper Bay / جونيبر باي, Bostan El Nada / بستان الندى, Zahret El Loz / زهرة اللوز. Web check 2026-10-27: no exact match; "Olive Ridge" is close to "The Ridge" and "Olive Oasis", kept (Momo) | No Emaar names. 2 English-style + 2 Arabic-style, like real Egyptian compounds; no shared words and different first sounds, so Whisper and the LLM can tell them apart |
+| 2026-10-27 | Unit format `B-204` = building letter + floor + apartment (2 digits); buildings A–F only (D4 B) | The brief's example. No P: it sounds like B in Egyptian Arabic ("بي"). Cost: B, C, D, E rhyme by voice → Phase 3 normalizes letters, and the summary confirmation catches mistakes |
+| 2026-10-27 | Size (D5 B): 3–6 buildings per compound, 3–6 floors, 2–4 apartments per floor; seed 42 → 188 units in 16 buildings. Kept as is, no "seed shopping" (Momo). Own generator `random.Random(seed)`, not `random.seed()` | Small but realistic compounds. A seed is chosen before seeing the result. Other code that uses `random` can't change our numbers |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
 - Which F1 the brief's "≥ 0.85" means: macro (every class counts the same) or weighted (by class size). Ask the instructor; with 8 unbalanced classes the two can differ a lot.
 - Ticket number format (default idea: `SR-YYYYMMDD-XXXX`).
+- How the DB stores a compound's two names (the registry has `compound_en` + `compound_ar`): two columns in `units`, or a `compounds` table (id, name_en, name_ar) that `units` points to. Decide in the Step 1.11 DB sketch.
 - Classifier v2: SetFit or multilingual BERT.
 - Final hosting: Oracle VM or Azure Container Apps free grant.
 - Value of N for conversation history, and the token budget per LLM call.
@@ -593,3 +603,11 @@ Format:
 - Status: ✅ all 174 groups of the year mapped (0 unmapped, 0 rule ties, all 75 rules used); sample: 79,544 kept, 10,861 dropped, every share within 0.1 points of the full year. pytest 92 passed (28 new), ruff clean, 6 deliberate breaks caught by the right tests. Sample: ac 27.3% (97.7% heating), plumbing 23.2, general 21.0, pest_control 9.1, carpentry 7.8, electricity 7.0, appliances 3.3, gas 1.2; urgency medium 70.3 / low 20.6 / high 9.2.
 - Known issues / TODO: 8 categories ≠ the brief's 6: instructor approval pending (section 14). 311 has no resident text, no cooling and no gas-smell rows: they come from Phase 2 synthetic data. Urgency labels are weak (one per problem group). The guide's Arabic is not yet checked by Momo. Which F1 (macro or weighted) → section 14. For the Step 1.12 stretch list: a safety tip in the bot's reply (gas smell), D8 B modifiers (baby, season), D10 C (two SRs from one message), D1 C (a real AC dataset).
 - What Momo did: chose D1 A (+ fix the AC imbalance), D2–D4 A, D5/D6 B (8 categories) + gas urgency a, D7 (table as shown), D8–D10 A; confirmed the 5 build choices (D7 rows, cooker tie rule, window guard, mixed row → higher level, 70/20/10) and the guide's 6 points.
+
+### Step 1.9 — Mock unit registry (2026-10-27)
+- Phase · role: Phase 1 · Backend & Memory
+- Files: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py`, `app/db/seed/units.csv` (188 rows, 8 KB, committed), `tests/test_generate_units.py` (new); CLAUDE.md sections 5, 6, 7, 12, 13, 14. Before the step: Step 1.8 committed (`e38dd0f`, `09f735b`) and pushed; CI green.
+- How it works: `build_registry(seed)` uses its own `random.Random(42)` to pick the buildings per compound, floors and apartments per floor, and makes units like `B-204`. `check_registry` lists every broken rule (duplicate key, a compound with two Arabic names or one Arabic name for two compounds, a unit outside its building), in English only; if there is one, nothing is written. `write_csv`: `.part` → rename.
+- Status: ✅ 188 units in 16 buildings (Olive Ridge 30, Juniper Bay 30, Bostan El Nada 56, Zahret El Loz 72); two runs → same SHA-256; Arabic names = the script. pytest 102 passed (10 new), ruff clean; 3 deliberate breaks (seed 43, the two randint calls swapped, duplicate check off) caught by the right tests. Fixed during the step: a set made the order of error messages change between runs (hash randomization) → `sorted`. Not yet run in CI (not pushed).
+- Known issues / TODO: Only apartments from floor 1: no villas, ground floors or odd numbering (→ data card, Step 1.10). A web search can't prove a name is unused. Phase 3: normalize spellings ("جونيبر بيه"; "ب" / "بي" / "b" → `B`) before the lookup. B-204 exists only in Bostan El Nada and Zahret El Loz (good "not found" test cases). Fake residents (brief: "units and users") → Phase 6 demo data. The CSV is UTF-8 without BOM: Excel may show broken Arabic, so open it in VS Code.
+- What Momo did: chose D0 A (commit Step 1.8 first), D1 A, D2 A, D3 1/2/4/5, D4 B, D5 B, seed 42; kept "Olive Ridge" and the 188 units.
