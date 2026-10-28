@@ -1,6 +1,6 @@
 # Data card
 
-**Version 1 · 2026-10-28 · Step 1.10**
+**Version 1.1 · 2026-10-28 · Step 1.10**
 
 This card lists **every data source** of the project: where it comes from, its license or terms,
 how it was made, what it may be used for, and what it does badly. The brief asks for it
@@ -40,7 +40,7 @@ now and later.
 
 | # | Source | Kind | Status | Terms | In git? | Used for |
 |---|---|---|---|---|---|---|
-| 3 | [NYC 311 housing complaints](#3-nyc-311-housing-complaints-hpd) | Public, real (city data) | ✅ in use (Steps 1.7–1.8) | NYC Open Data: no license needed, no restrictions on use, no warranty | No (too big; scripts are in git) | Problem list, label mapping, training base |
+| 3 | [NYC 311 housing complaints](#3-nyc-311-housing-complaints-hpd) | Public, real (city data) | ✅ in use (Steps 1.7–1.8) | NYC Open Data: no restrictions on use, no license attached, no warranty; name the source and version when we share | No (too big; scripts are in git) | Problem list, label mapping, training base |
 | 4 | [Mock unit registry](#4-mock-unit-registry) | Synthetic (our script) | ✅ in use (Step 1.9) | Our own work; no license chosen yet | Yes, `app/db/seed/units.csv` | `units` table, unit checks, demo |
 | 5 | [Test voice notes](#5-test-voice-notes) | Recorded by Momo, fake details | ✅ used once (Step 1.6) | Our own; not shared | No (personal data) | Whisper test only |
 | 6 | [Synthetic requests](#6-synthetic-requests-planned) | Synthetic (LLM) | ⏳ planned (Phase 2) | Depends on the model's license and the provider's terms | To decide | Training the classifier |
@@ -67,22 +67,30 @@ Emaar, so the instructor decides if and how it is licensed.
 - **License field: empty.** The dataset's metadata (`/api/views/erm2-nwe9.json`, checked
   2026-10-28) has `license: null`, `attribution: "311"`, `provenance: "official"`.
 - **The law behind NYC Open Data** (Local Law 11 of 2012, NYC Administrative Code, Title 23,
-  Chapter 5):
-  - §23-502(d): public data sets *"shall be made available without any registration requirement,
-    license requirement or restrictions"* on their use.
-  - §23-504(a): *"Public data sets made available on the web portal are provided for informational
-    purposes."* *"The city does not warranty the completeness, accuracy, content or fitness for
-    any particular purpose or use"* of a data set.
+  Chapter 5; official text: <https://codelibrary.amlegal.com/codes/newyorkcity/latest/NYCadmin/>):
+  - §23-504(a) ✅ (checked by Momo on the official site, 2026-10-28): *"Public data sets made
+    available on the web portal are provided for informational purposes. The city does not
+    warranty the completeness, accuracy, content or fitness for any particular purpose or use of
+    any public data set made available on the web portal, nor are any such warranties to be
+    implied or inferred with respect to the public data sets furnished therein."*
+  - §23-502(d) ✅ (checked by Momo on the official site, 2026-10-28): *"Such public data sets shall
+    be made available without any restrictions on their use provided that the department may
+    require a third party providing to the public any public data set, or application utilizing
+    such data set, to explicitly identify the source and version of the public data set, and a
+    description of any modifications made to such public data set."* (The rest of (d) says that
+    measures which keep the website working are not "restrictions".)
 - **nyc.gov Terms of Use** (<https://www.nyc.gov/main/terms-of-use>, checked 2026-10-28): materials
   are given *"AS IS"* and *"AS AVAILABLE"*; use the site *"only for lawful purposes"*.
-- **What this means for us:** we may download, change and share the data, with no fee and no
-  registration. There is **no guarantee** that it is correct, so we check it ourselves (the
-  Step 1.7 notebook). Credit is not required, but we credit it anyway: *"NYC Open Data, 311
-  Service Requests from 2020 to Present (erm2-nwe9)"*.
-- ⚠️ **Not yet checked on an official page.** The law quotes come from an unofficial copy of the
-  code (<https://nyc-laws.readthedocs.io/en/latest/nycadmincode/t23/c05/>). The Open Data terms
-  page did not load for our tools (404, or a redirect to a user guide without terms). Momo checks
-  the wording in a browser, then this line is removed.
+- **What this means for us:** we may download, change and share the data: the law allows any use,
+  and the dataset has no license attached. There is **no guarantee** that it is correct, so we
+  check it ourselves (the Step 1.7 notebook). When we share the data, or a report or app built on
+  it, we name the source, the version and our changes: *"NYC Open Data, 311 Service Requests from
+  2020 to Present (erm2-nwe9), export of 2026-10-22, filtered and relabeled by us (see the data
+  card)"*.
+- **Quote the official text only.** An unofficial copy of the code
+  (<https://nyc-laws.readthedocs.io/en/latest/nycadmincode/t23/c05/>) still has an older §23-502(d)
+  (*"without any registration requirement, license requirement or restrictions"*). The old NYC
+  Open Data terms page no longer loads (404, or a redirect to a user guide without terms).
 
 ### How it was made
 
@@ -458,3 +466,4 @@ test set; report the gap between synthetic and real-style performance."*
 | Version | Date | Change |
 |---|---|---|
 | 1 | 2026-10-28 | First version (Step 1.10): 3 sources in use (NYC 311, unit registry, voice notes), 3 planned (synthetic, translated, test set) |
+| 1.1 | 2026-10-28 | §3 terms checked by Momo on the official site: §23-504(a) and §23-502(d), full quotes. The unofficial copy had an older §23-502(d) ("registration requirement, license requirement"); fixed. Added the city's right to ask for source, version and changes, so we now name them when we share |
