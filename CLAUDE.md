@@ -143,6 +143,7 @@ Exists since Step 1.6: `eval/whisper_test.py` (transcribe the test notes: local 
 Exists since Step 1.7: `ml/sample_311.py` (HPD sample + full counts from the local 311 export), `tests/test_sample_311.py`, `ml/notebooks/01_explore_311.ipynb`. Git-ignored outputs: `ml/data/raw/311_hpd_sample.csv`, `ml/data/raw/311_hpd_population_counts.csv`.
 Exists since Step 1.8: `ml/label_mapping.py` (the 311 → category + urgency rules, one place), `ml/prepare_311.py`, `tests/test_label_mapping.py`, `tests/test_prepare_311.py`, `docs/labeling_guide.md` (the same rules in words; change both together). Git-ignored output: `ml/data/processed/311_mapped.csv`.
 Exists since Step 1.9: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py` (the recipe: seed 42, 4 fictional compounds, buildings A–F), `app/db/seed/units.csv` (committed; made only by the script, never by hand; columns `compound_en, compound_ar, building, unit_number`; 188 rows), `tests/test_generate_units.py` (golden-file test: the CSV = a fresh run).
+Exists since Step 1.10: `docs/data_card.md` (every data source: terms, how it was made, intended use, limits; 3 in use + 3 planned; a new source gets its section before it is used).
 
 ---
 
@@ -284,7 +285,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - [x] Download the NYC 311 data and keep only housing complaints (Momo's export, filtered to HPD by `ml/sample_311.py`; explored in Step 1.7)
 - [x] Map complaint types to the categories and an urgency level (8 categories: the brief's 6 + gas, appliances; `ml/label_mapping.py`, Step 1.8)
 - [x] Write `docs/labeling_guide.md` (Step 1.8)
-- [ ] Start `docs/data_card.md`
+- [x] Start `docs/data_card.md` (version 1: 3 sources in use + 3 planned for Phase 2; Step 1.10)
 
 **LLM & Speech**
 - [x] Get Groq and Gemini API keys
@@ -501,6 +502,9 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-27 | Compounds (D3): Olive Ridge / أوليف ريدج, Juniper Bay / جونيبر باي, Bostan El Nada / بستان الندى, Zahret El Loz / زهرة اللوز. Web check 2026-10-27: no exact match; "Olive Ridge" is close to "The Ridge" and "Olive Oasis", kept (Momo) | No Emaar names. 2 English-style + 2 Arabic-style, like real Egyptian compounds; no shared words and different first sounds, so Whisper and the LLM can tell them apart |
 | 2026-10-27 | Unit format `B-204` = building letter + floor + apartment (2 digits); buildings A–F only (D4 B) | The brief's example. No P: it sounds like B in Egyptian Arabic ("بي"). Cost: B, C, D, E rhyme by voice → Phase 3 normalizes letters, and the summary confirmation catches mistakes |
 | 2026-10-27 | Size (D5 B): 3–6 buildings per compound, 3–6 floors, 2–4 apartments per floor; seed 42 → 188 units in 16 buildings. Kept as is, no "seed shopping" (Momo). Own generator `random.Random(seed)`, not `random.seed()` | Small but realistic compounds. A seed is chosen before seeing the result. Other code that uses `random` can't change our numbers |
+| 2026-10-28 | Data card format (Step 1.10 D1 A): a summary table + the same 8 parts per source (status, source, terms, how it was made, size and columns, where it is stored, intended use, not for) + a limits table; planned sources get a "To fill in" list. A new source gets its section before it is used; unclear terms → not used | Easy to compare sources, about 2–3 screens each. The full "Datasheets for Datasets" list (about 50 questions) is too long and fits synthetic data badly |
+| 2026-10-28 | The data card holds the key numbers and links to the labeling guide and the Whisper report for details (D2 A) | The reader gets the main facts; big tables stay in one place, so two copies can't drift apart |
+| 2026-10-28 | No license for our own data yet (D3 A). The repo has no `LICENSE` file, which means "all rights reserved" by default | Intern work may belong to Emaar; the instructor decides if and how it is licensed (section 14) |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -512,6 +516,10 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - Value of N for conversation history, and the token budget per LLM call.
 - How the bot knows a voice note's language: auto-detect (costs +35–45% time with `large-v3`) or a hint, e.g. the language of the user's last text (Phase 2, `stt.py`). Step 1.6's "language set" used the answer from `reference.csv`, which the bot won't have.
 - One Telegram bot for everything, or a separate dev bot and demo/prod bot (decide before Phase 5: webhook and polling can't share one bot). Never write the bot's username or IDs in this public repo.
+- License for the repo and our own data (registry, test set): ask the instructor (Step 1.10 D3 A: none yet).
+- Which LLM writes the synthetic data and the translations (Phase 2). Its license decides what we may do with the outputs (data card §6: Llama 3.1+ → a model trained on its outputs and "made available" must be named "Llama…"; gpt-oss → Apache 2.0; Gemini free tier → no competing models, Google may read what we send). Use a different model for the ML vs LLM zero-shot comparison, or say it clearly in the report (circular comparison).
+- Whether the synthetic data and `eval/test_set.csv` go into git (Phase 2). Public = reproducible, but anyone (and future LLM training crawls) can read the test answers.
+- Whether a second person labels a part of the test set, to measure agreement (Phase 2).
 
 ---
 
@@ -611,3 +619,11 @@ Format:
 - Status: ✅ 188 units in 16 buildings (Olive Ridge 30, Juniper Bay 30, Bostan El Nada 56, Zahret El Loz 72); two runs → same SHA-256; Arabic names = the script. pytest 102 passed (10 new), ruff clean; 3 deliberate breaks (seed 43, the two randint calls swapped, duplicate check off) caught by the right tests. Fixed during the step: a set made the order of error messages change between runs (hash randomization) → `sorted`. Not yet run in CI (not pushed).
 - Known issues / TODO: Only apartments from floor 1: no villas, ground floors or odd numbering (→ data card, Step 1.10). A web search can't prove a name is unused. Phase 3: normalize spellings ("جونيبر بيه"; "ب" / "بي" / "b" → `B`) before the lookup. B-204 exists only in Bostan El Nada and Zahret El Loz (good "not found" test cases). Fake residents (brief: "units and users") → Phase 6 demo data. The CSV is UTF-8 without BOM: Excel may show broken Arabic, so open it in VS Code.
 - What Momo did: chose D0 A (commit Step 1.8 first), D1 A, D2 A, D3 1/2/4/5, D4 B, D5 B, seed 42; kept "Olive Ridge" and the 188 units.
+
+### Step 1.10 — Data card (2026-10-28)
+- Phase · role: Phase 1 · Data & ML
+- Files: `docs/data_card.md` (new, 11 sections); CLAUDE.md sections 5, 12, 13, 14. Before the step: Step 1.9 committed (`ddf89ea`, `1941df2`) and pushed; CI green on `1941df2`.
+- How it works: one section per source, each with the same 8 parts and a limits table: NYC 311, the unit registry and the voice notes (in use); synthetic requests, the translated subset and the test set (planned, each with a "To fill in" list). Around them: rules for all data (§1), a summary table (§2), a gaps-and-bias table for the final report (§9), update rules (§10) and a change log.
+- Status: ✅ every number checked against its source (file sizes, row counts, headers, label counts); 23 links, 0 broken; 0 phone-like numbers; data paths still git-ignored; ruff clean, pytest 102 passed (no code changed). ⚠️ The NYC law quotes come from an unofficial copy (the Open Data terms page gives 404 or a redirect); the LLM license notes come partly from web search summaries.
+- Known issues / TODO: Momo checks the NYC terms in a browser, then removes the ⚠️ line in card §3. Step 1.7's FAQ quote ("no restrictions on the use of Open Data") was not found live (the FAQ URL now redirects to a user guide); the card quotes the law (§23-502(d), §23-504(a)) instead. Found: the voice notes use compounds that are not in the registry (Cedar Park, Lotus Ridge, Nakhla Residence) and category labels from before the guide (2 × `?`, 1 × `plumbing+electricity`). Corrected: `HEAT/HOT WATER` (not heat alone) is 39.7%; the 311 gas rows are 966 "cooking gas shut off" + 8 "no gas". Not committed yet.
+- What Momo did: chose D0 A (commit Step 1.9 first), D1 A, D2 A, D3 A; approved part 1 and part 2 of the card.
