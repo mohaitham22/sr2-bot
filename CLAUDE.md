@@ -126,7 +126,8 @@ eval/                # test_set.csv, run_eval.py, ml_vs_llm.py, whisper_test.py,
   reports/           # whisper_phase1.md (Step 1.6)
 models/              # downloaded Whisper models, about 6.7 GB (git-ignored; STT_MODEL_DIR)
 migrations/          # Alembic
-docs/                # project_brief, data_card.md, labeling_guide.md, design_notes.md, model_report.md
+docs/                # project_brief, data_card.md, labeling_guide.md, design_notes.md, model_report.md,
+                     #   phase1_summary.md, progress_log.md
   prompts/           # step-by-step prompts for each phase (phase1.md, ...)
 tests/
 .github/workflows/ci.yml   # exists since Step 1.3: ruff check, ruff format --check, pytest
@@ -145,6 +146,7 @@ Exists since Step 1.8: `ml/label_mapping.py` (the 311 → category + urgency rul
 Exists since Step 1.9: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py` (the recipe: seed 42, 4 fictional compounds, buildings A–F), `app/db/seed/units.csv` (committed; made only by the script, never by hand; columns `compound_en, compound_ar, building, unit_number`; 188 rows), `tests/test_generate_units.py` (golden-file test: the CSV = a fresh run).
 Exists since Step 1.10: `docs/data_card.md` (every data source: terms, how it was made, intended use, limits; 3 in use + 3 planned; a new source gets its section before it is used).
 Exists since Step 1.11: `docs/design_notes.md` (the Phase 2 plan: §1 the 6 required fields with rules and bot questions, §2 the database sketch with the ER diagram, §3 the dashboard charts). Phase 2 code follows it; change it in the same commit when the code needs a change.
+Exists since Step 1.12: `docs/phase1_summary.md` (one page for the instructor: what we built, decisions vs the brief, Whisper results, risks, questions), `docs/progress_log.md` (the step entries of finished phases, moved from section 15).
 
 ---
 
@@ -281,7 +283,7 @@ Data and LLM work feeds the backend, and the backend feeds the dashboard and dep
 
 ---
 
-### Phase 1: Foundations (weeks 1–2) ◀ → Gate: scope freeze
+### Phase 1: Foundations (weeks 1–2) ✅ → Gate: scope freeze (frozen 2026-10-28, section 16; instructor review pending)
 **Phase 1 order (exception to the usual order):** setup → bot → Whisper test → data → design → review.
 Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 
@@ -314,7 +316,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 
 ---
 
-### Phase 2: Core AI (weeks 3–4)
+### Phase 2: Core AI (weeks 3–4) ◀
 **Data & ML**
 - [ ] Build the TF-IDF + logistic regression baseline for category and urgency; log it in MLflow
 - [ ] Generate synthetic Egyptian Arabic requests and a translated subset
@@ -521,6 +523,12 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-28 | SR status history: only `status` + `closed_at` (D9 A) | Enough for all 5 charts in the brief, "open over time" included. `in_progress_at` (D9 B) and a history table (D9 C) → stretch list |
 | 2026-10-28 | Metabase (D10 A): own read-only user `metabase_reader` that can read `compounds`, `units`, `predictions` and the view `dashboard_service_requests` (no `description`, no `user_id`); not `users`, `messages`, `user_units`. Report time zone `Africa/Cairo` | Section 9: names, phones and message texts can never appear on the dashboard. Tested: the role was denied |
 | 2026-10-28 | Smaller DB rules (Momo accepted): a `users` row is made at the first "yes", not at `/start`; `messages` has no `user_id` (found by chat ID); labels are `text` + CHECK, not ENUM; times are `timestamptz` (UTC); Telegram IDs are `bigint`; FK indexes added by hand, but not `predictions (sr_id)` (the UNIQUE index covers it); `service_requests.id` is identity BY DEFAULT, so the app can insert the id it took for the ticket | Store nobody who only says hello; a CHECK is easier to change in a migration than an ENUM; Telegram IDs can be bigger than an integer holds; Postgres doesn't index FKs by itself. Found or confirmed in check C1 |
+| 2026-10-28 | Keep the 16 GB 311 export in `ml/data/raw/` (Step 1.12, export A). Closes the Step 1.7 TODO | `sample_311` can be re-run at any time (Step 1.12 re-run: byte-identical); a new download is a different file. Cost: 16 GB on D:, and the Phase 2 Dockerfile needs a `.dockerignore` (section 17, T1) |
+| 2026-10-28 | Stretch list = CLAUDE.md section 16 (Step 1.12 D1 A) | Read in every session; the list is short and must be seen when a new idea comes |
+| 2026-10-28 | Technical-debt list = section 17, each debt with "pay back in phase X" (D2 A) | The Phase 1 TODOs move with the progress log to `docs/progress_log.md`; a list here keeps them visible |
+| 2026-10-28 | **Scope freeze** (D3, Momo's wording; full text at the top of section 16): in scope = the brief + section 13; a new idea goes to section 16 first and moves into a phase only after the week-6 gate passes and the core success criteria are on track, with a section 13 entry (instructor first); bug fixes and "how" choices are not scope changes; removing scope is allowed anytime | The brief's risk table: "Scope creep → freeze scope after week 2; extras go to a stretch list". The week-6 end-to-end demo comes before any extra |
+| 2026-10-28 | Stretch list S1–S11 and debt list T1–T9 as proposed (D4). S11 (photos) kept, with a privacy note | Photos can show faces and the inside of homes: they need a storage and deletion plan before any code |
+| 2026-10-29 | Step 1.12 committed in 2 commits, content + CLAUDE.md (D5 A). Milestone tag `phase-1-done` is **annotated** (D6 A) and is added only after the instructor has reviewed `docs/phase1_summary.md` (Momo) | Same history pattern as Steps 1.9–1.11. An annotated tag stores who, when and why. The tag marks the reviewed state, so any fix the instructor asks for goes in before it |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -531,7 +539,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 - How the bot knows a voice note's language: auto-detect (costs +35–45% time with `large-v3`) or a hint, e.g. the language of the user's last text (Phase 2, `stt.py`). Step 1.6's "language set" used the answer from `reference.csv`, which the bot won't have.
 - One Telegram bot for everything, or a separate dev bot and demo/prod bot (decide before Phase 5: webhook and polling can't share one bot). Never write the bot's username or IDs in this public repo.
 - License for the repo and our own data (registry, test set): ask the instructor (Step 1.10 D3 A: none yet).
-- Which LLM writes the synthetic data and the translations (Phase 2). Its license decides what we may do with the outputs (data card §6: Llama 3.1+ → a model trained on its outputs and "made available" must be named "Llama…"; gpt-oss → Apache 2.0; Gemini free tier → no competing models, Google may read what we send). Use a different model for the ML vs LLM zero-shot comparison, or say it clearly in the report (circular comparison).
+- Which LLM writes the synthetic data and the translations (Phase 2). Its license decides what we may do with the outputs (data card §6: Llama 3.1+ → a model trained on its outputs and "made available" must be named "Llama…"; gpt-oss → Apache 2.0; Gemini free tier → no competing models, Google may read what we send). Use a different model for the ML vs LLM zero-shot comparison, or say it clearly in the report (circular comparison). Note: on 2026-10-28 Groq listed no Llama chat model for our key, only `gpt-oss-120b`, `gpt-oss-20b`, `qwen3.8-27b`, `allam-2-7b` (section 17, T2).
 - Whether the synthetic data and `eval/test_set.csv` go into git (Phase 2). Public = reproducible, but anyone (and future LLM training crawls) can read the test answers.
 - Whether a second person labels a part of the test set, to measure agreement (Phase 2).
 - Phone check for non-Egyptian numbers (Phase 2, D1 C): add the `phonenumbers` library (new dependency, Apache 2.0) for the real per-country length, or keep the shape check only.
@@ -555,100 +563,42 @@ Format:
 - What Momo did:
 ```
 
-### Step 1.0 — Understand the project before we build (2026-10-24)
-- Phase · role: Phase 1 · All roles
-- Files: `CLAUDE.md` (this entry only). No code. Momo added `docs/prompts/phase1.md`.
-- How it works: Claude read CLAUDE.md, the brief and phase1.md, explained the project, the 6 phases and Phase 1, and checked the laptop's tools (read-only, nothing installed). Momo answered a 5-question quiz.
-- Status: ✅ done. Quiz 5/5 correct. Tools: git 2.54.0 ✅ (name/email set), Python 3.12 ✅, uv 0.12.19 ✅, Brief ✅. Docker CLI 29.9.2 + Compose v5.6.0 ⚠️: they come from Docker Desktop, which will be replaced by Rancher Desktop (not installed yet).
-- Known issues / TODO: Install Rancher Desktop (dockerd engine), remove Docker Desktop, test the engine (needed by Step 1.2). The repo is public, so ask the instructor before committing `docs/project_brief.pdf`.
-- What Momo did: Answered the quiz (5/5); found the section 9 gap and chose the new wording (A); chose Rancher Desktop; created the public repo `mohaitham22/sr2-bot`; added phase1.md.
+### Phase 1 — Foundations (2026-10-24 → 2026-10-28): ✅ done, scope frozen
+- Built: repo + CI, Postgres/Redis in Docker, a polling bot (text + voice), the Whisper test (`large-v3`; 80% usable Arabic < 85% → always confirm the transcript), NYC 311 → 79,544 labeled rows (8 categories, 3 urgency levels), the mock registry (188 units), the data card and the design notes.
+- Review (Step 1.12): 15/17 tasks ✅; 2 ⚠️ wait for the instructor (8 categories) and Phase 4 (85% target). Stretch list: section 16; debt: section 17; summary for the instructor: `docs/phase1_summary.md`.
+- All 13 step entries (1.0–1.12): `docs/progress_log.md`. ⏸️ The tag `phase-1-done` waits for the instructor's review of the summary (commands: Step 1.12 entry).
+---
 
-### Step 1.1 — Project skeleton and settings (2026-10-24)
-- Phase · role: Phase 1 · Backend & Memory
-- Files: `.gitignore`, `pyproject.toml`, `uv.lock`, `.python-version`, `.env.example`, `app/config.py`, `tests/test_config.py`, empty `__init__.py` packages (section 5). Local `.env` (git-ignored).
-- How it works: `app/config.py` reads settings from env vars and `.env`. All are optional; the 3 API keys and 2 DB URLs are `SecretStr`; `Settings.require()` lets each entry point fail fast, naming the missing variables. The 4 tests use fake values only and ignore the real `.env`.
-- Status: ✅ done. pytest 4 passed, ruff check + format clean, `uv sync` OK, `.env` ignored by git. Commits `5793af7` + `edaafe5` pushed to `mohaitham22/sr2-bot` (`main` tracks `origin/main`).
-- Known issues / TODO: Momo's 15.0 GB NYC 311 export (`311_Service_Requests_from_2020_to_Present_20261022.csv`) moved from the root to `ml/data/raw/` (git-ignored ✅); Step 1.7 decides how to use it. Harmless warnings: git LF→CRLF, uv hardlink. Rancher Desktop not installed yet (Step 1.2).
-- What Momo did: chose D1 (optional + fail fast), D2 (ruff I/UP/B), D3 (ignore the brief), D4 (DB URLs are secrets), kept Gmail as commit email; created `.env` from the template and set `STT_MODEL`.
+## 16. Stretch list (ideas not in the brief)
+**Scope freeze (Step 1.12 D3, Momo's wording):** Scope frozen on 2026-10-28 (end of Phase 1). In scope = the brief + the decisions in section 13. A new idea goes on this list first. It moves into a phase only after the week-6 gate passes and the core success criteria are on track, with a section 13 entry (discuss it with the instructor first). Bug fixes and "how" choices are not scope changes. Removing scope is allowed anytime.
 
-### Step 1.2 — Postgres and Redis in Docker (2026-10-25)
-- Phase · role: Phase 1 · Dashboard & DevOps
-- Files: `docker-compose.yml` (new), `.env.example` (`POSTGRES_*` block, real `DATABASE_URL`/`REDIS_URL` formats). Local `.env` filled by Momo.
-- How it works: Compose runs `postgres:16` and `redis:7` in Rancher Desktop (dockerd). Data lives in named volumes; healthchecks use `pg_isready` and `redis-cli ping`; ports are bound to 127.0.0.1 only. Postgres values come from `.env` as required variables (`${VAR:?…}`), and `DATABASE_URL` is built from them.
-- Status: ✅ all checks run and passed: `config --quiet` OK; both `(healthy)`; PostgreSQL 16.15 + password login over TCP; Redis 7.4.11 `PONG`; ports open on 127.0.0.1, closed on the network IP; `Settings` loads both URLs; a test table + Redis key survived `restart` and `down`/`up` (new container IDs), then were dropped with Momo's OK. Both databases are empty.
-- Known issues / TODO: if `POSTGRES_*` are empty, `DATABASE_URL` is not empty, so `require()` does not catch it (Compose does). PowerShell 5.1 drops nested quotes (section 6 note). Harmless leftover docker context `desktop-linux`. Step 1.0 TODO closed: Rancher Desktop installed, Docker Desktop removed, engine tested.
-- What Momo did: started Rancher Desktop; chose D1 B, D2 B, D3 A and default RDB; filled `.env`; typed the password into `.env.example` by mistake, then cleared it and made a new password before the first start (nothing was committed).
+| # | Idea | Note | From |
+|---|---|---|---|
+| S1 | Better Whisper scoring: number words → digits on both sides, remove fillers, fix reference texts by listening | Makes WER honest; does not change "usable %" | Whisper report §11 |
+| S2 | Tune `large-v3`: `vad_filter`, an `initial_prompt` with the registry's compound names, float32 vs int8, force `ar` | The prompt must hold no answers from the test notes; Whisper may copy prompt words into the transcript | Whisper report §11 |
+| S3 | Try Egyptian fine-tuned Whisper models and Cohere Transcribe Arabic | `MAdel121/whisper-medium-egy` was checked: not usable (mid-training checkpoint, dataset without license) | Whisper report §11 |
+| S4 | A safety tip in the bot's reply for a gas smell (e.g. open the windows, don't switch on lights) | Safety advice: the text must be checked first | Step 1.8 |
+| S5 | Urgency modifiers: a baby, an old or sick person, the season (D8 B) | Hard to label the same way twice | Step 1.8 |
+| S6 | Two problems in one message → two SRs (D10 C) | Today: one SR, the most urgent problem (D10 A) | Step 1.8 |
+| S7 | A real public AC-complaint dataset (D1 C) | NYC 311 has no cooling rows | Step 1.8 |
+| S8 | Charts: share of `needs_review` SRs; Arabic vs English SRs | Both columns are stored already | Design notes §3.9 |
+| S9 | Chart: voice vs text SRs | Needs a `source` column from the first SR; older SRs would have no value | Design notes §3.9 |
+| S10 | `in_progress_at` (D9 B) and a full status history table (D9 C) | Today: `status` + `closed_at` (D9 A) | Design notes §3.9 |
+| S11 | Residents send a photo of the problem | Privacy: photos can show faces and the inside of homes (personal data, section 9), so they need a storage and deletion plan first. Today the bot refuses photos and downloads nothing | Claude (Step 1.12) |
 
-### Step 1.3 — CI with GitHub Actions (2026-10-25)
-- Phase · role: Phase 1 · Dashboard & DevOps
-- Files: `.github/workflows/ci.yml` (new). Commits `24d6eab` + fix `ee31351` on `main`.
-- How it works: on every push and PR, GitHub starts a new `ubuntu-latest` machine (now Ubuntu 26.04), installs uv 0.12.19, runs `uv sync --locked`, then `ruff check`, `ruff format --check` and `pytest`. No secrets; read-only token; 10-minute timeout. setup-uv caches packages, keyed by a hash of `uv.lock` + `pyproject.toml`.
-- Status: ✅ `main` green since `ee31351` (job 11 s, cache saved, 14.4 MB). The first run (`24d6eab`) failed in "Set up job": `setup-uv@v10` does not exist, so it was pinned to `v10.3.2`. Learning test on branch `ci-learning-test`: single quotes → red ✗ (format check failed, pytest skipped); `ruff format .` → green ✓ (reused `main`'s cache); branch deleted with Momo's OK.
-- Known issues / TODO: Phase 5: pin both actions by commit SHA. The `pull_request` trigger is not tested yet (Phase 2 "Make CI run on every PR"). Step logs need a GitHub login (the public API returns 403); run status is public. No local workflow checker (`actionlint`/`act` would be new tools).
-- What Momo did: chose D1 A, D2 A, D3 A (then fix A after the failed run), D4 A; approved each commit, push and the branch deletion.
+---
 
-### Step 1.4 — Telegram bot: text (2026-10-25)
-- Phase · role: Phase 1 · Backend & Memory
-- Files: `pyproject.toml` + `uv.lock` (aiogram 3.31.0), `app/bot/handlers.py`, `app/bot/middlewares.py`, `app/bot/polling.py`, `app/logging_setup.py`, `tests/test_bot.py`, `tests/test_logging_setup.py`. Local `.env`: token filled by Momo.
-- How it works: `polling.py` checks the token (fail fast), sets up logging (secrets → `***`) and long-polls Telegram with aiogram. A Router answers `/start` (English + Egyptian Arabic) and echoes any other text. An outer middleware logs only update type, chat ID and text length.
-- Status: ✅ pytest 10 passed, ruff clean. Live test on Momo's phone: greeting and English + Arabic echo correct. The full token, its secret part and all message texts were absent from the live logs (script printed yes/no only). Ctrl+C in Momo's terminal: clean stop, no ERROR (exit code 0 in the experiment). The first Ctrl+C test logged a false ERROR; cause found in aiogram's source, fixed with D5 B.
-- Known issues / TODO: aiogram caps pydantic below 2.14. The bot is public: anyone who finds its username can message it. The Linux stop path (aiogram's own SIGINT/SIGTERM handler) is not tested yet (Phase 3, Docker). Handler order (`start` before `echo`) was checked by hand, not by a test. Non-text messages get no reply yet (Step 1.5).
-- What Momo did: created the dev bot with @BotFather and filled `TELEGRAM_BOT_TOKEN` in `.env`; chose D1 A, D2 A, D3 A, D4 B, D5 B, D6 B; ran the live tests (phone + Ctrl+C twice).
+## 17. Technical debt (known weaknesses in what we built)
+Each debt has a phase to pay it back. When it is paid, delete the row and say so in the progress log. A new shortcut gets a row here when we take it.
 
-### Step 1.5 — Telegram bot: voice notes (2026-10-26)
-- Phase · role: Phase 1 · Backend & Memory
-- Files: `app/bot/voice_files.py` (new), `app/bot/handlers.py` (`save_voice`, `unsupported`, greeting line), `app/bot/polling.py`, `app/config.py` + `.env.example` (`VOICE_SAVE_USER_IDS`), `.gitignore` (`eval/voice/raw/`), `tests/test_voice_files.py` + `tests/test_polling.py` (new), `tests/test_bot.py`, `tests/test_config.py`. Local `.env`: Momo's ID.
-- How it works: for a voice note from an allowed ID, the bot checks the 20 MB limit, reserves the next file name, calls getFile, downloads the OGG/Opus file and replies with name, duration and size (English + Arabic). On any error the half-written file is deleted. Other message types get a polite reply; logs hold only the content type, file name and numbers.
-- Status: ✅ pytest 26 passed, ruff clean; 3 deliberate breaks (no file cleanup, no allowlist, wrong `dp` key) were caught by the right tests. Live: `001` (2.65 s) and `003` (Arabic, 20.87 s) are valid OGG/Opus (all page CRCs OK), Momo played them, not in `git status`. Duplicates explained, not bugs: one note sent twice (`002`); 2 notes sent while the bot was off arrived together (`004`, 44 ms after `003`; the name reservation worked). Copies deleted with Momo's OK.
-- Known issues / TODO: The same note sent twice is saved twice (no check of `file_unique_id`). `001` and `003` are not part of Step 1.6's 15 recordings (Momo's choice): all 15 are recorded new; both files deleted with Momo's OK, so `eval/voice/raw/` is empty. Closes 1.4 TODOs: handler order is now tested; non-text messages get a reply. The 311 CSV had moved back to the repo root (Oct 25, 16:41, not by Claude); moved to `ml/data/raw/` again with Momo's OK.
-- What Momo did: chose D1 A, D2 A and bilingual replies; found the user ID in the bot's log and set `VOICE_SAVE_USER_IDS` in `.env`; ran the live test and played the files; explained the duplicates; approved the CSV move and deleting `002`/`004`.
-
-### Step 1.6 — Early Whisper test on Egyptian Arabic (2026-10-26 → 2026-10-27)
-- Phase · role: Phase 1 · LLM & Speech
-- Files: `eval/whisper_test.py`, `eval/score_whisper.py`, `tests/test_whisper_test.py`, `tests/test_score_whisper.py`, `eval/reports/whisper_phase1.md` (new); `app/config.py` + `tests/test_config.py` + `.env.example` (`STT_MODEL_DIR`, `STT_MODEL=large-v3`); `pyproject.toml` + `uv.lock` (faster-whisper 1.2.1, groq 1.7.0 dev, `av<19`); `.gitignore` (`models/`, all of `eval/voice/`). Git-ignored: 15 voice notes, reference/results/scores/judgments CSVs, `review.md`, 6.7 GB of models.
-- How it works: `whisper_test` transcribes the 15 notes (10 ar, 5 en, 342 s) with 4 local sizes (int8, 4 threads) and Groq large-v3, with language auto and set: 150 rows, written one by one (resume), 429 retry. `score_whisper` computes WER/CER and digit checks and joins the judgments (rule D3 B) into one summary table.
-- Status: ⚠️ works with issues. pytest 59 passed, ruff clean, 6 deliberate breaks caught by the right tests; full CPU run (about 28 min of transcription + 39 min of model downloads) and Groq run done (10 live 429s, all recovered). Result: best usable Arabic 80% (medium, large-v3, Groq) < 85% target → D10 A + fallback D11 A. Issues: the 31 Arabic judgments of the large models are Claude's only (not reviewed by Momo); each Arabic note = 10 points; `set` uses the oracle language; WER is too pessimistic (numbers in words, fillers, reference ≠ audio in V02/V07/V10).
-- Known issues / TODO: Momo sets `STT_MODEL=large-v3` in `.env`. Re-measure speed on the server (Phase 5). Parked second-round ideas (report section 11: scoring normalization, VAD, initial_prompt, float32, forced `ar`, Egyptian fine-tunes, Cohere) → stretch list in Step 1.12. `MAdel121/whisper-medium-egy` checked (card only): SpeechBrain mid-training checkpoint, dataset without license, not usable.
-- What Momo did: got the Groq + Gemini keys; recorded 15 notes full of hard cases and wrote `reference.csv`; chose D1 A, D2 (own format), D3 B, D4–D9 A, D10 A, D11 A, D12 A; reviewed 21 Arabic judgments (changed V05); listened to V11/V12/V15 (the reference was right: model errors).
-
-### Step 1.7 — Explore the NYC 311 data (2026-10-27)
-- Phase · role: Phase 1 · Data & ML
-- Files: `ml/sample_311.py`, `tests/test_sample_311.py`, `ml/notebooks/01_explore_311.ipynb` (new); `pyproject.toml` + `uv.lock` (dev: pandas 3.1.0, ipykernel 7.4.0, nbconvert 7.17.2, matplotlib 3.11.2; 57 packages in total). Git-ignored: `311_hpd_sample.csv` (90,405 rows, 45.6 MB) and `311_hpd_population_counts.csv` (174 groups) in `ml/data/raw/`.
-- Source (for the data card, Step 1.10): NYC Open Data "311 Service Requests from 2020 to Present", ID `erm2-nwe9`, https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9/about_data (publisher OTI, updated daily; 2010–2019 is `76ig-c548`). License field empty; NYC Open Data Terms of Use: "provided for informational purposes", no warranty of "completeness, accuracy, content, or fitness"; FAQ: "There are no restrictions on the use of Open Data." No personal data about the caller (dataset description). Export: CSV of all rows by Momo on 2026-10-22, 16.1 GB, 22,879,856 rows.
-- Filters: agency = `HPD`; 2025-10-01 ≤ created < 2026-10-01; `unique_key` ends in `7`; at most 100,000 rows; 14 columns (D1 B, D2 A, D3 A). Population 904,284 HPD rows (live API on 2026-10-27: 904,286).
-- How it works: `sample_311` reads the export row by row (174 s, constant memory). It counts every HPD row in the window and writes the 10% sample (API names, ISO dates; `.part` file renamed at the end). The notebook answers the 5 questions: 3-level tree of fixed choices (13 types, 60 pairs, 174 groups); no resident free text (`resolution_description` = 37 HPD templates); missing data low (`closed_date` 3.1% = the Open ones; `descriptor_2` "N/A" 4.3%); very unbalanced (heat 39.7%, biggest/smallest 308×).
-- Status: ✅ script run: 0 bad rows, sample 90,405, no cap. pytest 64 passed (5 new), 2 deliberate breaks caught by the right tests, ruff clean (notebook included), notebook ran with 0 errors, sample within 0.08 points of the population for every type, data files not in `git status`.
-- Known issues / TODO: for Step 1.8: no air conditioning in HPD data (closest: GENERAL / VENTILATION SYSTEM, 4,722); heat (39.7%) has no category of its own; one odd row `Safety/Safety/Safety`. The terms quotes come from copies (the live page blocks tools: 403/404); Momo checks them in a browser. Missing data checked only for our 14 columns. Decide in Step 1.12 whether to keep the 16 GB export.
-- What Momo did: chose D1 B (local export, not the API), D2 A, D3 A, D4 A; approved the section 12 tick.
-
-### Step 1.8 — Category and urgency mapping + labeling guide (2026-10-27)
-- Phase · role: Phase 1 · Data & ML
-- Files: `ml/label_mapping.py`, `ml/prepare_311.py`, `tests/test_label_mapping.py`, `tests/test_prepare_311.py`, `docs/labeling_guide.md` (new); CLAUDE.md sections 5, 6, 7, 12, 13, 14. Git-ignored: `ml/data/processed/311_mapped.csv` (79,544 rows, 8 columns).
-- How it works: `label_mapping.py` has 75 rules (a default per complaint type + exceptions; the most specific wins) that turn a 311 problem into `Label(category, urgency, subcategory)` or `Drop(reason)`. `prepare_311` applies them to the 90,405-row sample, writes the kept rows (`.part` → rename) and prints counts; a problem with no rule stops it, and no file is written. The guide has the same rules in words, edge cases, EN + Egyptian Arabic examples and the Phase 2 seed lists (AC cooling, gas).
-- Status: ✅ all 174 groups of the year mapped (0 unmapped, 0 rule ties, all 75 rules used); sample: 79,544 kept, 10,861 dropped, every share within 0.1 points of the full year. pytest 92 passed (28 new), ruff clean, 6 deliberate breaks caught by the right tests. Sample: ac 27.3% (97.7% heating), plumbing 23.2, general 21.0, pest_control 9.1, carpentry 7.8, electricity 7.0, appliances 3.3, gas 1.2; urgency medium 70.3 / low 20.6 / high 9.2.
-- Known issues / TODO: 8 categories ≠ the brief's 6: instructor approval pending (section 14). 311 has no resident text, no cooling and no gas-smell rows: they come from Phase 2 synthetic data. Urgency labels are weak (one per problem group). The guide's Arabic is not yet checked by Momo. Which F1 (macro or weighted) → section 14. For the Step 1.12 stretch list: a safety tip in the bot's reply (gas smell), D8 B modifiers (baby, season), D10 C (two SRs from one message), D1 C (a real AC dataset).
-- What Momo did: chose D1 A (+ fix the AC imbalance), D2–D4 A, D5/D6 B (8 categories) + gas urgency a, D7 (table as shown), D8–D10 A; confirmed the 5 build choices (D7 rows, cooker tie rule, window guard, mixed row → higher level, 70/20/10) and the guide's 6 points.
-
-### Step 1.9 — Mock unit registry (2026-10-27)
-- Phase · role: Phase 1 · Backend & Memory
-- Files: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py`, `app/db/seed/units.csv` (188 rows, 8 KB, committed), `tests/test_generate_units.py` (new); CLAUDE.md sections 5, 6, 7, 12, 13, 14. Before the step: Step 1.8 committed (`e38dd0f`, `09f735b`) and pushed; CI green.
-- How it works: `build_registry(seed)` uses its own `random.Random(42)` to pick the buildings per compound, floors and apartments per floor, and makes units like `B-204`. `check_registry` lists every broken rule (duplicate key, a compound with two Arabic names or one Arabic name for two compounds, a unit outside its building), in English only; if there is one, nothing is written. `write_csv`: `.part` → rename.
-- Status: ✅ 188 units in 16 buildings (Olive Ridge 30, Juniper Bay 30, Bostan El Nada 56, Zahret El Loz 72); two runs → same SHA-256; Arabic names = the script. pytest 102 passed (10 new), ruff clean; 3 deliberate breaks (seed 43, the two randint calls swapped, duplicate check off) caught by the right tests. Fixed during the step: a set made the order of error messages change between runs (hash randomization) → `sorted`. Not yet run in CI (not pushed).
-- Known issues / TODO: Only apartments from floor 1: no villas, ground floors or odd numbering (→ data card, Step 1.10). A web search can't prove a name is unused. Phase 3: normalize spellings ("جونيبر بيه"; "ب" / "بي" / "b" → `B`) before the lookup. B-204 exists only in Bostan El Nada and Zahret El Loz (good "not found" test cases). Fake residents (brief: "units and users") → Phase 6 demo data. The CSV is UTF-8 without BOM: Excel may show broken Arabic, so open it in VS Code.
-- What Momo did: chose D0 A (commit Step 1.8 first), D1 A, D2 A, D3 1/2/4/5, D4 B, D5 B, seed 42; kept "Olive Ridge" and the 188 units.
-
-### Step 1.10 — Data card (2026-10-28)
-- Phase · role: Phase 1 · Data & ML
-- Files: `docs/data_card.md` (new, 11 sections); CLAUDE.md sections 5, 12, 13, 14. Before the step: Step 1.9 committed (`ddf89ea`, `1941df2`) and pushed; CI green on `1941df2`.
-- How it works: one section per source, each with the same 8 parts and a limits table: NYC 311, the unit registry and the voice notes (in use); synthetic requests, the translated subset and the test set (planned, each with a "To fill in" list). Around them: rules for all data (§1), a summary table (§2), a gaps-and-bias table for the final report (§9), update rules (§10) and a change log.
-- Status: ✅ every number checked against its source (file sizes, row counts, headers, label counts); 23 links, 0 broken; 0 phone-like numbers; data paths still git-ignored; ruff clean, pytest 102 passed (no code changed). v1 committed (`6dd39ab`, `cb48a56`), CI green. NYC terms checked by Momo on the official site (codelibrary.amlegal.com, Title 23, Chapter 5): §23-504(a) matched; §23-502(d) did NOT match the unofficial copy (older wording with "registration requirement, license requirement"), so card v1.1 quotes the official text. The LLM license notes come partly from web search summaries (the card says "for planning, not legal advice").
-- Known issues / TODO: §23-502(d) lets the city ask anyone who shares the data, or an app built on it, to name the source, version and changes; the card now says we do that. Step 1.7's FAQ quote ("no restrictions on the use of Open Data") was not found live (the FAQ URL now redirects to a user guide); the card quotes the law (§23-502(d), §23-504(a)) instead. Found: the voice notes use compounds that are not in the registry (Cedar Park, Lotus Ridge, Nakhla Residence) and category labels from before the guide (2 × `?`, 1 × `plumbing+electricity`). Corrected: `HEAT/HOT WATER` (not heat alone) is 39.7%; the 311 gas rows are 966 "cooking gas shut off" + 8 "no gas".
-- What Momo did: chose D0 A (commit Step 1.9 first), D1 A, D2 A, D3 A; approved part 1 and part 2 of the card; checked §23-504(a) and §23-502(d) on the official site and found the outdated quote (the nyc.gov Terms of Use page has neither quote).
-
-### Step 1.11 — Design notes: required fields, database sketch, dashboard plan (2026-10-28)
-- Phase · role: Phase 1 · LLM & Speech, Backend & Memory, Dashboard & DevOps
-- Files: `docs/design_notes.md` (new: §1 fields, §2 database, §3 dashboard, change log); CLAUDE.md sections 4, 5, 7, 12, 13, 14. No code. Before the step: Step 1.10 committed and pushed (`bf12895`), tree clean.
-- How it works: §1 gives each of the 6 fields a type, EN + AR examples, cleanup, a validation rule, the follow-up question and the "invalid" reply, plus the question order and returning users. §2 has the Mermaid ER diagram and 7 tables with keys, CHECK and ON DELETE rules, the ticket format and the `/forget` steps. §3 maps the brief's 5 charts to columns, an SQL idea and what must be stored; Metabase reads a view without personal data.
-- Status: ✅ design tested (check C1) in the local Postgres 16.15, in one transaction that ended with ROLLBACK (no tables and no role before or after): all 188 registry units loaded through the CHECKs; 20/20 bad inserts refused; `metabase_reader` denied on `users`, `messages`, `service_requests`; the doc's own 7 SQL blocks (copied out by a script) gave the answers worked out by hand; `/forget` left 6 SRs on the dashboard. ruff clean, pytest 102 passed, 0 phone-like numbers. ⏸️ The Mermaid diagram is not yet seen drawn (no local tool; check on GitHub after the push).
-- Known issues / TODO: C1 found 5 fixes, all made in the doc (identity BY DEFAULT, the `lpad` cut, numbers skip, no `predictions (sr_id)` index, the phone CHECK). The C1 SQL lives only in Claude's scratchpad (not committed); Phase 2 tests the real models. Not tested: Metabase on the view, real LLM extraction, the Arabic cleanup rules (Phase 2–3). For the Step 1.12 stretch list: voice vs text SRs (needs a `source` column from the first SR), `needs_review` share, Arabic vs English chart, D9 B/C.
-- What Momo did: chose D1 C, D2 B, D3 A, D4 B, D5 B, D6 B, D7 A, D8 C, D9 A, D10 A and C1 yes; confirmed part 1 (Arabic questions, building letters, E.164 storage); accepted the 3 small DB proposals; started Rancher Desktop for C1; put voice vs text on the stretch list.
+| # | Debt | Risk while it stays | Pay back in |
+|---|---|---|---|
+| T1 | No `.dockerignore` yet | A Docker build would send the 16 GB 311 export, 6.7 GB of models, `eval/voice/` and `.env` into the build: slow, and secrets and personal data could end up in the image | Phase 2, with the Dockerfile |
+| T2 | Groq no longer lists Llama chat models for our key (2026-10-28: `gpt-oss-120b`, `gpt-oss-20b`, `qwen3.8-27b`, `allam-2-7b`) | Data card §6 and the section 14 LLM question name options we can't use; Qwen's license is not in the card | Phase 2, when choosing the LLM |
+| T3 | The same voice note sent twice is handled twice (no `file_unique_id` check) | Two SRs for one problem | Phase 3 |
+| T4 | The bot's stop on Linux (SIGTERM) is not tested | Unclean stop in Docker | Phase 3, in Docker |
+| T5 | Voice `reference.csv` uses compounds that are not in the registry (Cedar Park, Lotus Ridge, Nakhla Residence) and old labels (2 × `?`, 1 × `plumbing+electricity`) | The Phase 4 re-measure can't test the registry lookup | Phase 4, before re-measuring |
+| T6 | All settings are optional; `require()` misses empty `POSTGRES_*` | A missing value fails late, with an unclear error | Phase 5 |
+| T7 | GitHub Actions pinned by tag, not by commit SHA | A moved tag could run other code; low risk until the deploy step adds secrets | Phase 5 (CD step) |
+| T8 | `av<19` (for faster-whisper 1.2.1); aiogram caps pydantic `<2.14` | We miss fixes in newer versions | When the upstream packages support them |
+| T9 | No `README.md` (a brief deliverable: "Git repository with README and setup instructions") | The public repo has no front page; CLAUDE.md is not a README | Phase 6 |
