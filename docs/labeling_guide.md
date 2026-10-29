@@ -1,6 +1,6 @@
 # Labeling guide
 
-**Version 1.1 · 2026-10-28 · Step 1.12**
+**Version 1.2 · 2026-10-29 · Step 2.1**
 
 This guide says how to give one maintenance message its **category** and **urgency**.
 Everyone who labels uses it: the person writing and labeling the test set (`eval/test_set.csv`,
@@ -86,7 +86,7 @@ people are affected, and the season do **not** change the urgency. "The AC isn't
 | Case | Category |
 |---|---|
 | Gas smell or gas leak, even if it "went away" | `gas` |
-| Sparks, smoke or a burning smell from a socket, switch, light or wires; exposed wires | `electricity` |
+| Sparks, smoke or a burning smell from a socket, switch, light, wires or the AC; exposed wires | `electricity` |
 | Water touching electricity (wet light fixture, water near a socket) | `electricity` |
 | Flooding, water pouring from a ceiling or wall, water going into another flat | `plumbing` |
 | No water at all in the unit | `plumbing` |
@@ -96,6 +96,7 @@ people are affected, and the season do **not** change the urgency. "The AC isn't
 | A ceiling or wall falling down | `general` |
 | A fall risk: missing stairs, a broken balcony railing | `general` |
 | A person stuck in the elevator | `general` |
+| A scorpion or a snake inside the unit (other pests, rats included, are `medium`) | `pest_control` |
 
 A water cut may come from the city, not the building. It is still `high`: we label the
 message, not the cause.
@@ -143,6 +144,7 @@ In Phase 3 the bot can ask the resident to send the second problem as a new requ
 | There's mold on the bedroom wall. / الحيطة في أوضة النوم فيها عفن | general, medium | Mold with no named cause (D4 A) |
 | The wall has mold from the bathroom leak. / الحيطة فيها عفن من التسريب اللي في الحمام | plumbing, medium | The source is named (§3.3) |
 | No gas reaches the cooker. / البوتاجاز مش بيوصله غاز | gas, medium | The gas supply, not the cooker |
+| The gas valve is stiff; the gas works and there's no smell. / محبس الغاز ناشف بس الغاز شغال ومفيش ريحة | gas, low | Small: no smell, and the gas still works |
 | A cooker knob is broken. / زرار البوتاجاز مكسور | appliances, low | The cooker itself |
 | The oven doesn't heat. / الفرن مش بيسخن | appliances, medium | The cooker itself, and it doesn't work |
 | The gas water heater won't light (no smell). / السخان مش بيولع | plumbing, medium | The water heater is plumbing; no gas smell |
@@ -156,6 +158,9 @@ In Phase 3 the bot can ask the resident to send the second problem as a new requ
 | The tap in the bathroom sink gives no water. / حنفية الحوض مش بتنزل مية | plumbing, medium | One tap, not the whole unit |
 | There's no water at all in the flat. / مفيش مية خالص في الشقة | plumbing, high | The whole unit (§4) |
 | The toilet keeps running. / السيفون بيفضل شغال على طول | plumbing, low | It works; it only wastes water |
+| The tap drips, even all day. / الحنفية بتنقط على طول | plumbing, low | Small; the home works normally. "Dripping" is not "pouring" (§4) |
+| Smoke comes out of the AC. / التكييف طالع منه دخان | electricity, high | The dangerous part decides (§3.2), before the source (§3.3) |
+| There's a scorpion in the bathroom. / فيه عقرب في الحمام | pest_control, high | Danger to people now (§4). A rat in the kitchen is `medium` |
 | Garbage is piling up in the corridor. / الزبالة متكومة في الطرقة | general, medium | |
 | The balcony railing is loose. / سور البلكونة مخلخل | general, high | Fall risk |
 | The elevator stopped with someone inside. / الأسانسير وقف وفيه حد محبوس جواه | general, high | A person is in danger now |
@@ -195,6 +200,7 @@ rows are heating.)
 | A hissing sound from the gas pipe | فيه صوت تسريب من ماسورة الغاز | high |
 | No gas in the flat | الغاز مقطوع عندنا | medium |
 | No gas reaches the cooker | البوتاجاز مش بيوصله غاز | medium |
+| The gas valve is stiff or the meter cover is broken (no smell) | محبس الغاز ناشف | low |
 
 ---
 
@@ -239,3 +245,4 @@ gets its own balance (for example the AC mix above).
 |---|---|---|
 | 1 | 2026-10-27 | First version (Step 1.8): 8 categories, 3 urgency levels, D1–D10 |
 | 1.1 | 2026-10-28 | Step 1.12: all 47 Egyptian Arabic lines checked by Momo (native speaker); no changes. Rules unchanged |
+| 1.2 | 2026-10-29 | Step 2.1 (test-set review, G2a, G3a, G3c): smoke from the AC → `electricity` (§4 table, §6); a scorpion or snake inside → `high`, other pests `medium` (§4, §6); a dripping tap → `low` (§6); a stiff gas valve or a broken meter cover, with no smell → `gas, low` (§6, §7; the first `low` gas example). `ml/label_mapping.py` unchanged: 311 has no AC smoke and no scorpions, and its 864 sample rows `FAUCET BROKEN/MISSING/LEAKING` mix a broken tap with a drip, so they stay `medium` (mixed rows, §8). Step 2.6: a synthetic message about a drip only is `low` |

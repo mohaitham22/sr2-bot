@@ -36,6 +36,11 @@ eval/voice/
 *.wav
 *.m4a
 
+# --- Test set (Step 2.1 D6 A): its fake phone numbers may belong to real people ---
+# eval/test_set.csv, the untouched original and the review file stay on the laptop.
+# The checker (eval/check_test_set.py) is committed; its name doesn't match this pattern
+eval/test_set*
+
 # --- Internal documents (repo is public) ---
 docs/project_brief.pdf
 
