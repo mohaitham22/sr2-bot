@@ -128,7 +128,7 @@ models/              # downloaded Whisper models, about 6.7 GB (git-ignored; STT
 migrations/          # Alembic
 docs/                # project_brief, data_card.md, labeling_guide.md, design_notes.md, model_report.md,
                      #   phase1_summary.md, progress_log.md
-  prompts/           # step-by-step prompts for each phase (phase1.md, ...)
+  prompts/           # step-by-step prompts for each phase (phase1.md, phase2.md, ...)
 tests/
 .github/workflows/ci.yml   # exists since Step 1.3: ruff check, ruff format --check, pytest
 pyproject.toml  uv.lock  .python-version  .gitignore  .env.example   # exist since Step 1.1
@@ -147,6 +147,7 @@ Exists since Step 1.9: `app/db/seed/__init__.py`, `app/db/seed/generate_units.py
 Exists since Step 1.10: `docs/data_card.md` (every data source: terms, how it was made, intended use, limits; 3 in use + 3 planned; a new source gets its section before it is used).
 Exists since Step 1.11: `docs/design_notes.md` (the Phase 2 plan: §1 the 6 required fields with rules and bot questions, §2 the database sketch with the ER diagram, §3 the dashboard charts). Phase 2 code follows it; change it in the same commit when the code needs a change.
 Exists since Step 1.12: `docs/phase1_summary.md` (one page for the instructor: what we built, decisions vs the brief, Whisper results, risks, questions), `docs/progress_log.md` (the step entries of finished phases, moved from section 15).
+Exists since Step 2.0: `docs/prompts/phase2.md` (Momo's step prompts for Phase 2, Steps 2.0–2.13).
 
 ---
 
@@ -168,6 +169,13 @@ uv run ruff check . && uv run ruff format .   # lint + format          ✅ works
 uv run ruff format --check .              # only report, change nothing (what CI runs)   ✅ works (Step 1.3)
 uv sync --locked                          # fail if uv.lock is out of date (what CI runs) ✅ works (Step 1.3)
 # CI runs on GitHub on every push and pull request: https://github.com/mohaitham22/sr2-bot/actions   ✅ works (Step 1.3)
+git switch main                           # start each step from the newest main ...   ✅ works (Step 2.0)
+git pull                                  #   ... with the merged PRs from GitHub      ✅ works (Step 2.0)
+git switch -c step-2.1-test-set           # one branch per step: step-<n>-<short-title>   ✅ works (Step 2.0)
+git push -u origin step-2.1-test-set      # first push of the branch (Claude asks first), then open the PR on GitHub
+git diff main...step-2.1-test-set         # what the PR changes (Claude's review reads this)
+git branch -D step-2.1-test-set           # only after GitHub shows "Merged": -D, because git can't see a squashed branch as merged
+git fetch --prune                         # forget branches that were deleted on GitHub
 uv run mlflow ui                          # http://localhost:5000
 uv run python -m ml.train_baseline
 uv run python -m eval.run_eval
@@ -317,6 +325,17 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 ---
 
 ### Phase 2: Core AI (weeks 3–4) ◀
+**Phase 2 order (the test set first, not the usual role order):** 2.0 kickoff → 2.1 test set format + checker (then Momo writes the test set over the next days, in parallel) → 2.2 DB models + Alembic → 2.3 Redis session store → 2.4 LLM client → 2.5 STT service → **test set frozen (≥ 200 rows, hash in section 13)** → 2.6 synthetic data + translated subset → 2.7 baseline + MLflow → 2.8 extraction → 2.9 follow-up questions → 2.10 LangGraph skeleton → 2.11 Dockerfile + stronger CI → 2.12 Metabase + fake rows → 2.13 review.
+Step-by-step prompts: `docs/prompts/phase2.md` (Steps 2.0–2.13). One branch + one PR per step (section 13, 2026-10-29).
+Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
+- 2.2: 7 tables, `compounds` included (Step 1.11 D6 B); the prompt lists 6.
+- 2.4: the prompt retries on 429 + 5xx with jitter; Step 1.6 D8 A retried only on 429 → decide in 2.4.
+- 2.5: STT is local faster-whisper `large-v3`, never the Groq API (2026-10-25, D10 A). So no "local backup when Groq fails" question and no 429 retry; the quality signals (`avg_logprob`, `no_speech_prob`) come from faster-whisper itself.
+- 2.7: the prompt trains on synthetic data only; the brief names NYC 311 as the training data, and the data card says "Phase 2 decides" → decide in 2.6/2.7 and tell the instructor.
+- 2.8: phone = E.164, any country (Step 1.11 D1 C), not "+20 → 0".
+- 2.9: question order, grouping and "after 3 wrong answers" are decided (Step 1.11 D4 B); the fixed question texts are in `docs/design_notes.md` §1.
+- 2.11: `main` protection is set up in Step 2.0 (D3 A); 2.11 adds the new CI jobs to the ruleset and does the learning test.
+
 **Data & ML**
 - [ ] Build the TF-IDF + logistic regression baseline for category and urgency; log it in MLflow
 - [ ] Generate synthetic Egyptian Arabic requests and a translated subset
@@ -529,6 +548,10 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 | 2026-10-28 | **Scope freeze** (D3, Momo's wording; full text at the top of section 16): in scope = the brief + section 13; a new idea goes to section 16 first and moves into a phase only after the week-6 gate passes and the core success criteria are on track, with a section 13 entry (instructor first); bug fixes and "how" choices are not scope changes; removing scope is allowed anytime | The brief's risk table: "Scope creep → freeze scope after week 2; extras go to a stretch list". The week-6 end-to-end demo comes before any extra |
 | 2026-10-28 | Stretch list S1–S11 and debt list T1–T9 as proposed (D4). S11 (photos) kept, with a privacy note | Photos can show faces and the inside of homes: they need a storage and deletion plan before any code |
 | 2026-10-29 | Step 1.12 committed in 2 commits, content + CLAUDE.md (D5 A). Milestone tag `phase-1-done` is **annotated** (D6 A) and is added only after the instructor has reviewed `docs/phase1_summary.md` (Momo) | Same history pattern as Steps 1.9–1.11. An annotated tag stores who, when and why. The tag marks the reviewed state, so any fix the instructor asks for goes in before it |
+| 2026-10-29 | **Phase 2 order** (`docs/prompts/phase2.md`, section 12): Step 2.1 prepares the test set, then Momo writes it by hand over the next days while Steps 2.2–2.5 run; it is frozen (≥ 200 rows; row count + SHA-256 recorded here) before Step 2.6; then 2.6–2.13 | Brief: the test set is "written and labeled by the interns themselves, kept out of training". Written before Momo sees synthetic data or model results, it stays independent (no leakage, no tuning on the test). Steps 2.2–2.5 don't need it |
+| 2026-10-29 | **Git workflow** (Step 2.0 D1 A, D2 A): one branch per step, made from an up-to-date `main`, named `step-<n>-<short-title>` (e.g. `step-2.1-test-set`); one PR per step; **squash and merge**, PR title = a Conventional Commit with the step number (e.g. `feat: redis session store (step 2.3)`). Ends Phase 1's direct commits to `main`. Claude still asks before each commit and push | Brief: "All interns review each other's pull requests". `main` always passes CI; each step = one commit on `main`, easy to undo; the PR page shows the instructor the whole step. Cost: after a squash, git can't see the branch as merged, so it is deleted with `git branch -D`, only after GitHub shows "Merged" |
+| 2026-10-29 | **`main` protected** (D3 A): GitHub ruleset `protect-main` on the default branch: PR required (0 approvals), check "Lint, format and test" must pass, no force push, no deletion, empty bypass list. Repo settings: squash merging only, default message = PR title, head branches deleted after merge | CI can't be skipped. 0 approvals, because GitHub never lets an author approve their own PR (1 would lock Momo out). Cost: even a one-line doc fix needs a PR |
+| 2026-10-29 | **PR reviews** (D4 A): Claude reviews in the chat from `git diff main...<branch>` (each finding with `file:line`, marked "must fix" or "suggestion"; helper prompt "Review my pull request" in `phase2.md`); Momo writes a 1–2 line summary on the PR and merges. No GitHub CLI (`gh`) for now | No new tool; the summary is in Momo's words. Limit: Claude helped write the code, so it is a second look, not an independent review; the instructor is the independent reviewer |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -567,6 +590,14 @@ Format:
 - Built: repo + CI, Postgres/Redis in Docker, a polling bot (text + voice), the Whisper test (`large-v3`; 80% usable Arabic < 85% → always confirm the transcript), NYC 311 → 79,544 labeled rows (8 categories, 3 urgency levels), the mock registry (188 units), the data card and the design notes.
 - Review (Step 1.12): 15/17 tasks ✅; 2 ⚠️ wait for the instructor (8 categories) and Phase 4 (85% target). Stretch list: section 16; debt: section 17; summary for the instructor: `docs/phase1_summary.md`.
 - All 13 step entries (1.0–1.12): `docs/progress_log.md`. ⏸️ The tag `phase-1-done` waits for the instructor's review of the summary (commands: Step 1.12 entry).
+
+### Step 2.0 — Phase 2 kickoff (2026-10-29)
+- Phase · role: Phase 2 · All roles
+- Files: `docs/prompts/phase2.md` (new, Momo's); CLAUDE.md sections 5, 6, 12, 13, 15. Branch `step-2.0-kickoff` (the first step on a branch).
+- How it works: no code. Phase 1 checked: all its outputs exist, pytest 102 passed, ruff clean, `main` = `origin/main`. Phase 2's goal, tasks per role and Phase 3 links explained; train / validation / test, data leakage and "never tune on the test" taught; the step order and the git workflow logged.
+- Status: ⏸️ CLAUDE.md updated; waiting for the quiz answers, Momo's OK to commit + push + open the first PR, and the `protect-main` ruleset (D3 A). "Make CI run on every PR" stays unticked until the ruleset is checked.
+- Known issues / TODO: 7 places where `phase2.md` disagrees with section 13 are listed under Phase 2 in section 12 (section 13 wins). For Step 2.1: decide if Claude may read the test-set rows (risk: their wording leaks into the Step 2.6 synthetic-data prompts). `gh` is not installed (D4 A: not needed).
+- What Momo did: saved `phase2.md`; chose D1 A, D2 A, D3 A, D4 A (Claude's recommendations).
 ---
 
 ## 16. Stretch list (ideas not in the brief)
