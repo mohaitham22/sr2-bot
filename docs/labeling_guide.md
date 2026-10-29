@@ -1,6 +1,6 @@
 # Labeling guide
 
-**Version 1 · 2026-10-27 · Step 1.8**
+**Version 1.1 · 2026-10-28 · Step 1.12**
 
 This guide says how to give one maintenance message its **category** and **urgency**.
 Everyone who labels uses it: the person writing and labeling the test set (`eval/test_set.csv`,
@@ -238,3 +238,4 @@ gets its own balance (for example the AC mix above).
 | Version | Date | Change |
 |---|---|---|
 | 1 | 2026-10-27 | First version (Step 1.8): 8 categories, 3 urgency levels, D1–D10 |
+| 1.1 | 2026-10-28 | Step 1.12: all 47 Egyptian Arabic lines checked by Momo (native speaker); no changes. Rules unchanged |

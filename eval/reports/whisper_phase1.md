@@ -1,6 +1,6 @@
 # Whisper test on Egyptian Arabic (Step 1.6, Phase 1)
 
-Date: 2026-10-27 · Author: Momo (with Claude Code) · Risk from the brief: "Egyptian Arabic voice
+Date: 2026-10-27, judgments review updated 2026-10-28 (Step 1.12) · Author: Momo (with Claude Code) · Risk from the brief: "Egyptian Arabic voice
 transcription is weak. Mitigation: test Whisper sizes early (week 2); fall back to asking the user
 to confirm the transcript."
 
@@ -42,9 +42,11 @@ laptop (git-ignored, decision D12 A).
   is scored apart** (all 11 digits right). Names are not scored.
 - **Who judged:** Claude judged every different transcript first, with a written reason
   (`eval/voice/judgments.csv`). Momo reviewed the 21 Arabic judgments of `small` and `medium` and
-  changed 2 of them. ⚠️ The **31 Arabic judgments of `large-v3`, turbo and Groq are by Claude only**
-  (not reviewed by Momo yet). Rule used for borderline cases: a unit letter written as "ب" stuck to
-  the number ("شقة بمية وعشرة") counts as B-110 (Momo approved this rule on V07 `small`).
+  changed 2 of them (Step 1.6). In Step 1.12 (2026-10-28) Momo reviewed the other 31 Arabic
+  judgments (`large-v3`, turbo, Groq) and changed none: **all 52 Arabic judgments are checked by a
+  native speaker**. The 26 English judgments are by Claude only. Rule used for borderline cases: a
+  unit letter written as "ب" stuck to the number ("شقة بمية وعشرة") counts as B-110 (Momo approved
+  this rule on V07 `small`).
 - **WER / CER:** word and character error rate after a light normalization (tashkeel removed;
   أ إ آ → ا, ة → ه, ى → ي; ٠-٩ → 0-9; punctuation removed). See section 9 for why WER is too
   pessimistic here.
@@ -161,7 +163,8 @@ digit were usually right.
    numbers as words while some models write digits; models write fillers ("اه") that the reference
    leaves out; and some reference texts miss words that were really said (all models agree on
    extra words in V02, V07 and V10). "Usable %" is judged by meaning, so it is not affected.
-4. **31 Arabic judgments (large models) are not reviewed by Momo yet** (section 3).
+4. **One judge per transcript:** the Arabic judgments were checked by Momo, the English ones are
+   by Claude only; no second person judged, so agreement between judges is not measured (section 3).
 5. RAM use, float32 and the server CPU were not measured.
 6. Workaround: `faster-whisper` 1.2.1 does not work with `av` 19 (`av.open()` lost the
    `metadata_errors` argument), so `pyproject.toml` limits `av<19` (decision D7 A).
