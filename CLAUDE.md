@@ -120,7 +120,8 @@ app/
 ml/                  # data prep (sample_311.py, label_mapping.py, prepare_311.py), train_baseline.py, train_setfit.py
   data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample; processed/ holds 311_mapped.csv (Step 1.8)
   notebooks/         # EDA notebooks, saved with outputs (01_explore_311.ipynb)
-eval/                # test_set.csv, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py
+eval/                # check_test_set.py, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py
+                     #   test_set*.csv / .md: git-ignored (Step 2.1 D6 A)
   voice/             # git-ignored, the whole folder: raw/ (test voice notes saved by the bot),
                      #   reference.csv, results.csv, scores.csv, judgments.csv, review.md (Step 1.6)
   reports/           # whisper_phase1.md (Step 1.6)
@@ -128,7 +129,8 @@ models/              # downloaded Whisper models, about 6.7 GB (git-ignored; STT
 migrations/          # Alembic
 docs/                # project_brief, data_card.md, labeling_guide.md, design_notes.md, model_report.md,
                      #   phase1_summary.md, progress_log.md
-  prompts/           # step-by-step prompts for each phase (phase1.md, phase2.md, ...)
+  prompts/           # step-by-step prompts for each phase (phase1.md, phase2.md, ...),
+                     #   test_set_extra_rows.md (Step 2.1: the prompt for the 30 gas + appliances rows)
 tests/
 .github/workflows/ci.yml   # exists since Step 1.3: ruff check, ruff format --check, pytest
 pyproject.toml  uv.lock  .python-version  .gitignore  .env.example   # exist since Step 1.1
@@ -148,6 +150,7 @@ Exists since Step 1.10: `docs/data_card.md` (every data source: terms, how it wa
 Exists since Step 1.11: `docs/design_notes.md` (the Phase 2 plan: §1 the 6 required fields with rules and bot questions, §2 the database sketch with the ER diagram, §3 the dashboard charts). Phase 2 code follows it; change it in the same commit when the code needs a change.
 Exists since Step 1.12: `docs/phase1_summary.md` (one page for the instructor: what we built, decisions vs the brief, Whisper results, risks, questions), `docs/progress_log.md` (the step entries of finished phases, moved from section 15).
 Exists since Step 2.0: `docs/prompts/phase2.md` (Momo's step prompts for Phase 2, Steps 2.0–2.13).
+Exists since Step 2.1: `eval/check_test_set.py` (checks every test-set row against the guide, design notes §1 and the registry; prints coverage + SHA-256; exit code 1 on a problem), `tests/test_check_test_set.py` (a tiny fake CSV, so CI never needs the real file), `docs/prompts/test_set_extra_rows.md`. Git-ignored, on Momo's laptop only: `eval/test_set.csv` (252 rows), `eval/test_set_original.csv` (as Claude chat wrote it), `eval/test_set_extra.csv` (the 30 rows as sent), `eval/test_set_review.md` (the location before/after).
 
 ---
 
@@ -182,6 +185,8 @@ uv run python -m eval.run_eval
 uv run python -m eval.whisper_test        # Step 1.6 Whisper test: local models, then Groq → eval/voice/results.csv (resumes)   ✅ works (Step 1.6)
 uv run python -m eval.whisper_test --engine local --models small   # one engine / model only   ✅ works (Step 1.6)
 uv run python -m eval.score_whisper       # score results.csv → scores.csv, review.md + summary table   ✅ works (Step 1.6)
+uv run python -m eval.check_test_set      # Step 2.1: check eval/test_set.csv → problems, coverage, SHA-256 (exit 1 on a problem)   ✅ works (Step 2.1)
+uv run python -m eval.check_test_set --path eval/test_set_original.csv   # check another file   ✅ works (Step 2.1)
 uv run python -m ml.sample_311            # Step 1.7: read the 16 GB 311 export → HPD sample + full counts in ml/data/raw/ (about 3 min)   ✅ works (Step 1.7)
 uv run python -m ml.prepare_311           # Step 1.8: label the 311 sample → ml/data/processed/311_mapped.csv + counts per category/urgency (about 2 s)   ✅ works (Step 1.8)
 uv run python -m app.db.seed.generate_units   # Step 1.9: make app/db/seed/units.csv (seed 42 → 188 units); commit the CSV if it changes   ✅ works (Step 1.9)
@@ -240,6 +245,7 @@ Metabase reads only `compounds`, `units`, `predictions` and the view `dashboard_
 - **Never save LLM-extracted unit info** to the profile until the user confirms it.
 - **Secrets go in `.env`** (git-ignored). Keep `.env.example` up to date. Never print keys.
 - **The test set (`eval/test_set.csv`) is never used** for training or as prompt examples.
+- **The synthetic training data comes from a different model family than the test set.** The test set is written by Claude, so the training data is never written by Claude (Step 2.1).
 
 ---
 
@@ -325,7 +331,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 ---
 
 ### Phase 2: Core AI (weeks 3–4) ◀
-**Phase 2 order (the test set first, not the usual role order):** 2.0 kickoff → 2.1 test set format + checker (then Momo writes the test set over the next days, in parallel) → 2.2 DB models + Alembic → 2.3 Redis session store → 2.4 LLM client → 2.5 STT service → **test set frozen (≥ 200 rows, hash in section 13)** → 2.6 synthetic data + translated subset → 2.7 baseline + MLflow → 2.8 extraction → 2.9 follow-up questions → 2.10 LangGraph skeleton → 2.11 Dockerfile + stronger CI → 2.12 Metabase + fake rows → 2.13 review.
+**Phase 2 order (the test set first, not the usual role order):** 2.0 kickoff → 2.1 test set review + checker → **test set frozen (row count + hash in section 13)** → 2.2 DB models + Alembic → 2.3 Redis session store → 2.4 LLM client → 2.5 STT service → 2.6 synthetic data + translated subset → 2.7 baseline + MLflow → 2.8 extraction → 2.9 follow-up questions → 2.10 LangGraph skeleton → 2.11 Dockerfile + stronger CI → 2.12 Metabase + fake rows → 2.13 review.
 Step-by-step prompts: `docs/prompts/phase2.md` (Steps 2.0–2.13). One branch + one PR per step (section 13, 2026-10-29).
 Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 - 2.2: 7 tables, `compounds` included (Step 1.11 D6 B); the prompt lists 6.
@@ -339,7 +345,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 **Data & ML**
 - [ ] Build the TF-IDF + logistic regression baseline for category and urgency; log it in MLflow
 - [ ] Generate synthetic Egyptian Arabic requests and a translated subset
-- [ ] Hand-write 200–300 test requests in `eval/test_set.csv` (never used for training)
+- [x] AI-written test set (`eval/test_set.csv`): reviewed and frozen (never used for training). Step 2.1: 252 rows, checker 0 problems; frozen as v1 (hash in section 13)
 
 **LLM & Speech**
 - [ ] Write `app/services/stt.py` using self-hosted Whisper (`faster-whisper`)
@@ -553,6 +559,15 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 | 2026-10-29 | **`main` protected** (D3 A): GitHub ruleset `protect-main` on the default branch: PR required (0 approvals), check "Lint, format and test" must pass, no force push, no deletion, empty bypass list. Repo settings: squash merging only, default message = PR title, head branches deleted after merge | CI can't be skipped. 0 approvals, because GitHub never lets an author approve their own PR (1 would lock Momo out). Cost: even a one-line doc fix needs a PR |
 | 2026-10-29 | **PR reviews** (D4 A): Claude reviews in the chat from `git diff main...<branch>` (each finding with `file:line`, marked "must fix" or "suggestion"; helper prompt "Review my pull request" in `phase2.md`); Momo writes a 1–2 line summary on the PR and merges. No GitHub CLI (`gh`) for now | No new tool; the summary is in Momo's words. Limit: Claude helped write the code, so it is a second look, not an independent review; the instructor is the independent reviewer |
 | 2026-10-29 | GitHub's automatic Copilot review of PRs is turned off (Step 2.0 D5 A; Momo: "do what you recommend"). It came from "automatic review settings", not from the ruleset | D4 A: Claude reviews in the chat. A tool outside our stack (rule 9); with no quota it only posts "unable to review" on every PR |
+| 2026-10-29 | **AI-written test set** (Momo, Step 2.1): every row of `eval/test_set.csv` is written by Claude (chat), `author = ai` (222 rows on arrival). Claude Code checks them against the guide and the registry; Momo decides every change. Replaces "Momo writes it by hand while Steps 2.2–2.5 run" (Phase 2 order above): the test set is frozen right after Step 2.1. Claude Code may read the rows (closes the Step 2.0 TODO). ⚠️ Differs from the brief ("written and labeled by the interns themselves"; risk table: "Hand-written test set"); Momo tells the instructor, approval pending | Momo's choice: one file with all planned edge cases (tags), ready now. **Risks:** (1) scores too optimistic, because the synthetic training data is AI-written too → it comes from a different model family (section 9), the Step 2.6 leakage check drops near-copies, and every score says "AI-written test set"; (2) Claude Code's review is not independent of the writer (same family) → Momo decides; (3) Claude Code has read every row, so its Step 2.6 prompt drafts may reuse test wording → leakage check, and Momo reviews the prompts; (4) the brief's "gap between synthetic and real-style performance" is only partly measurable → optional: 20–40 messages by real people, scored apart |
+| 2026-10-29 | Test set uses the **8 categories** (Step 2.1 D1 A): the 3 gas-smell rows (labeled `general`) → `gas`; about 15 `gas` + 15 `appliances` rows are added (there were 0) | The classifier learns 8 classes. A class with 0 rows can't be measured; with 3 rows, one mistake moves its recall by 33 points |
+| 2026-10-29 | **Test set fits the registry** (D2 A, D3 A). Compounds: Lotus Ridge → Olive Ridge, Cedar Park → Juniper Bay, Nakhla Residence → half Bostan El Nada, half Zahret El Loz; short forms and typos keep their style (لوتس → أوليف). Number buildings → letters; every unit → a real registry unit (letter and floor kept when possible); expected `building` = the unit's letter; a self-correction keeps its wrong first value. Only location words change | The file used other compound names, buildings 1–25 and units like C-712 (112 of 150 units can't exist), so the strict registry check (Step 1.11 D3 A) would refuse almost all. The code fills the building from the unit's letter (design notes §1.4), so the expected value must too, or the eval counts it as a hallucination. Changing the registry instead (D3 C) would undo Steps 1.9 and 1.11 |
+| 2026-10-29 | Expected `phone` in E.164, `+20…` (D4 A); the message text keeps the resident's way of writing | The format the code stores (Step 1.11 D1 C), so the eval compares cleaned values directly |
+| 2026-10-29 | A message too vague for any category (T076) stays for the extraction tests, with empty `category` and `urgency` and the tag `vague`; the classifier score skips it (D5 A). Vague rows with a clear category keep their labels | Labeling guide §6: too vague to label = not a classifier test message. It still tests the follow-up "what is the problem?" |
+| 2026-10-29 | **Test set not in git** (D6 A): `eval/test_set*` is git-ignored (the file, the untouched original `eval/test_set_original.csv`, the review file). The hash goes in this log at the freeze; Momo sends the file to the instructor privately and keeps a backup. CI tests the checker with a tiny fake file. Closes the test-set part of the section 14 question | Its "fake" phone numbers are random Egyptian mobiles that may belong to real people (same reason as Step 1.6 D12 A). The answers stay private too |
+| 2026-10-29 | **Test-set label review** (Step 2.1, Momo accepted all): 43 rows changed, no message text. G1 (27 rows, clear by the guide): gas smell → `gas`; electric water heater → `plumbing`; AC water on a socket → `electricity`; intercom and doorbell → `electricity, low`; toilet running → low; exhaust fan → `ac, medium`; AC smell → low; broken lock, elderly parent, rat → `medium` (D8 A). G2 (12, the guide's rule order): smoke from the AC → `electricity`; water near a light → `electricity`; the building door → `carpentry`; peeling paint → low; skirting board → `general`; basement water → `plumbing`. G3: scorpion stays high; elevator stays medium (debt T10); a dripping tap → low (T099, T204). T155 gets `arabic_digits`; T076 has no labels (D5 A). Labeling guide v1.2 makes 3 cases clear: smoke from the AC, scorpion or snake, dripping tap | 39 of 222 AI labels (18%) broke our guide: Claude chat never saw it. After the review, no row has `ac` + `high`: by the guide, the AC itself is never danger now, so the Step 2.6 data must not make that pair either |
+| 2026-10-29 | **30 extra test rows** (D1 A, author `ai`): Claude (chat) wrote T223–T252 from `docs/prompts/test_set_extra_rows.md` (our guide, registry and field rules; no test message): 15 `gas` (8 high, 5 medium, 2 low) + 15 `appliances` (9 medium, 6 low, 0 high). Momo accepted the numbers and the first `gas, low` example (a stiff valve or a broken meter cover, no smell), now in guide v1.2 | Gas had 3 rows and appliances 0. With the rules in the prompt, all 30 passed the checker and the label review the first time (the first 222 needed 39 label and 167 location fixes). No `appliances` + `high`: danger from a device is `electricity` or `plumbing` by the guide |
+| 2026-10-29 | **Test set frozen (v1):** `eval/test_set.csv`, **252 rows**, SHA-256 **`786e72ad2179f88b3d1c9418dd84038154bfae39c4da18c819db9d18754ecbcc`** (computed by `uv run python -m eval.check_test_set`, line ends read as LF); checker 0 problems; labeling guide v1.2. Last look: 20 random rows (seed 2026) all agree with the guide; T082 (a door handle came off) stays `medium`. **From now on no change** without a new entry here: fix the row with the guide (and check its similar rows, not only the model's errors), run the checker, record "Test set changed (v2)" with the id, old → new label, reason, row count and new hash, then re-run every score on v2 | The test set is the ruler for every model (baseline, v2, LLM zero-shot): if it changes between measurements, a better score may come from an easier test. Changing it after seeing results is tuning on the test. Fixing only the rows the model got wrong moves the score in one direction. The hash proves which version a score used; never mix v1 and v2 scores in one table |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -564,7 +579,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 - One Telegram bot for everything, or a separate dev bot and demo/prod bot (decide before Phase 5: webhook and polling can't share one bot). Never write the bot's username or IDs in this public repo.
 - License for the repo and our own data (registry, test set): ask the instructor (Step 1.10 D3 A: none yet).
 - Which LLM writes the synthetic data and the translations (Phase 2). Its license decides what we may do with the outputs (data card §6: Llama 3.1+ → a model trained on its outputs and "made available" must be named "Llama…"; gpt-oss → Apache 2.0; Gemini free tier → no competing models, Google may read what we send). Use a different model for the ML vs LLM zero-shot comparison, or say it clearly in the report (circular comparison). Note: on 2026-10-28 Groq listed no Llama chat model for our key, only `gpt-oss-120b`, `gpt-oss-20b`, `qwen3.8-27b`, `allam-2-7b` (section 17, T2).
-- Whether the synthetic data and `eval/test_set.csv` go into git (Phase 2). Public = reproducible, but anyone (and future LLM training crawls) can read the test answers.
+- Whether the synthetic data goes into git (Step 2.6). Public = reproducible, but anyone can read it. The test set: not in git (Step 2.1 D6 A).
 - Whether a second person labels a part of the test set, to measure agreement (Phase 2).
 - Phone check for non-Egyptian numbers (Phase 2, D1 C): add the `phonenumbers` library (new dependency, Apache 2.0) for the real per-country length, or keep the shape check only.
 - How long to keep `messages` of conversations that never became an SR (`/reset`, 30 min idle). Message text is personal data (section 9). Decide before Phase 3 saves messages.
@@ -599,6 +614,14 @@ Format:
 - Status: ✅ quiz 5/5 (small additions given). Ruleset `protect-main` read back from GitHub's API: deletion and force-push blocked, PR with 0 approvals, required check "Lint, format and test". First PR #1: both runs (push + pull_request) green, the merge box offers only "Squash and merge". Not seen: a merge blocked by a red check (planned in Step 2.11).
 - Known issues / TODO: 7 places where `phase2.md` disagrees with section 13 are listed under Phase 2 in section 12 (section 13 wins). For Step 2.1: decide if Claude may read the test-set rows (risk: their wording leaks into the Step 2.6 synthetic-data prompts). Unclear: the ruleset field `require_extra_approval_for_unattributed_changes: true` (not found in GitHub's docs on 2026-10-29; PR #1 stayed mergeable). Copilot's automatic review (failed on PR #1: no quota) → off (D5 A), Momo switches it off in the GitHub settings. `gh` is not installed (D4 A: not needed).
 - What Momo did: saved `phase2.md`; chose D1 A, D2 A, D3 A, D4 A, D5 A (Claude's recommendations); answered the quiz; set up the ruleset and the merge settings; opened PR #1.
+
+### Step 2.1 — Test set: review, check, prepare to freeze (2026-10-29)
+- Phase · role: Phase 2 · Data & ML. Branch `step-2.1-test-set`.
+- Files: `eval/check_test_set.py`, `tests/test_check_test_set.py`, `docs/prompts/test_set_extra_rows.md` (new); `docs/labeling_guide.md` v1.2, `docs/data_card.md` v1.2, `.gitignore`, CLAUDE.md; Momo's `docs/prompts/phase2.md`. Git-ignored: `eval/test_set.csv` (252 rows) + original, extra rows, review.
+- How it works: the test set is AI-written (Claude chat; D1–D6 in section 13). The checker tests every row against the guide, design notes §1 and the registry: 501 problems in the original. Momo decided 43 label changes (guide v1.2) and the registry fit (167 rows, phones E.164); Claude chat added 15 gas + 15 appliances rows from a prompt with our rules.
+- Status: ✅ checker 0 problems on 252 rows; pytest 154 passed; ruff clean; realism review: 30 random rows, 0 marked; Anthropic terms read. ✅ **Frozen as v1** (freeze prompt, same day): 20 random rows re-read, none changed; row count + SHA-256 in section 13. ⏸️ Not committed yet.
+- Known issues / TODO: ⚠️ AI-written test set differs from the brief (instructor approval pending). Debt T10 (311 elevator rule) before training. The counts in `phase2.md` ("plumbing 45, …") are from before the review (Momo's file: suggestion only). Momo backs up `eval/test_set.csv` (not in git).
+- What Momo did: chose D1–D6; accepted the label review (G1–G4); read the location review and 30 random rows; ran the extra-rows prompt in Claude chat and saved the 30 rows.
 ---
 
 ## 16. Stretch list (ideas not in the brief)
@@ -634,3 +657,4 @@ Each debt has a phase to pay it back. When it is paid, delete the row and say so
 | T7 | GitHub Actions pinned by tag, not by commit SHA | A moved tag could run other code; low risk until the deploy step adds secrets | Phase 5 (CD step) |
 | T8 | `av<19` (for faster-whisper 1.2.1); aiogram caps pydantic `<2.14` | We miss fixes in newer versions | When the upstream packages support them |
 | T9 | No `README.md` (a brief deliverable: "Git repository with README and setup instructions") | The public repo has no front page; CLAUDE.md is not a README | Phase 6 |
+| T10 | 311 rule `ELEVATOR` → `general, low`, but the test set labels "elevator broken" `medium` (Step 2.1 G3b: "something important doesn't work") | The classifier learns low from 311 and loses points on the test for it | Step 2.6, before training: rule → medium in `ml/label_mapping.py` + its test + the guide; re-run `prepare_311` |

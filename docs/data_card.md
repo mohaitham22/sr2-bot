@@ -1,6 +1,6 @@
 # Data card
 
-**Version 1.1 · 2026-10-28 · Step 1.10**
+**Version 1.2 · 2026-10-29 · Step 2.1**
 
 This card lists **every data source** of the project: where it comes from, its license or terms,
 how it was made, what it may be used for, and what it does badly. The brief asks for it
@@ -29,7 +29,8 @@ now and later.
 3. **Messages, transcripts and voice notes count as personal data**, even when the words are fake:
    a voice is personal, and a message can contain a name or a phone. They never go into git.
 4. **Free LLM and speech APIs get fake data only.** Free tiers may use what we send for training.
-5. **The test set is never used for training** or as an example in a prompt.
+5. **The test set is never used for training** or as an example in a prompt. The synthetic
+   training data comes from a different model family than the test set: never Claude (section 8).
 6. **A new source gets its section in this card before we use it.** If its terms are unclear, we
    don't use it.
 7. **We keep only the columns we need** (data minimization). For example: no addresses from NYC 311.
@@ -45,7 +46,7 @@ now and later.
 | 5 | [Test voice notes](#5-test-voice-notes) | Recorded by Momo, fake details | ✅ used once (Step 1.6) | Our own; not shared | No (personal data) | Whisper test only |
 | 6 | [Synthetic requests](#6-synthetic-requests-planned) | Synthetic (LLM) | ⏳ planned (Phase 2) | Depends on the model's license and the provider's terms | To decide | Training the classifier |
 | 7 | [Translated subset](#7-translated-subset-planned) | Synthetic (LLM translation) | ⏳ planned (Phase 2) | Same as source 6 | To decide | More training data in the other language |
-| 8 | [Hand-written test set](#8-hand-written-test-set-planned) | Written and labeled by Momo | ⏳ planned (Phase 2) | Our own; no license chosen yet | To decide | The final scores only |
+| 8 | [AI-written test set](#8-ai-written-test-set) | Synthetic (Claude, chat); labels checked by Momo | ✅ frozen v1 (Step 2.1): 252 rows | Anthropic Consumer Terms: outputs are ours, not for training competing models; our labels: no license yet | No (D6 A: phone numbers) | The final scores only |
 
 **Our own data has no license yet** (decision D3 A). The repo has no `LICENSE` file, which by
 default means "all rights reserved": others may read it, but not reuse it. This is intern work for
@@ -152,7 +153,7 @@ build them again you need the same export and 2 commands:
 
 ### Not for
 
-- **Not the test set.** The final scores come only from the hand-written test set (section 8).
+- **Not the test set.** The final scores come only from the test set (section 8).
 - **Not a picture of Egyptian compounds.** Its counts and seasons describe New York.
 - **Not for finding people or buildings.** We removed addresses and coordinates; don't add them back.
 
@@ -387,45 +388,78 @@ The test set, and the final scores.
 
 ---
 
-## 8. Hand-written test set (planned)
+## 8. AI-written test set
 
 | Part | Details |
 |---|---|
-| **Status** | ⏳ Planned for Phase 2. Not written yet |
-| **Source** | 200–300 requests **written and labeled by Momo** (brief: *"written and labeled by the interns themselves, kept out of training"*), in `eval/test_set.csv` |
-| **Terms** | Our own work. No license chosen yet (D3 A, section 2) |
+| **Status** | ✅ **Frozen as v1** on 2026-10-29 (Step 2.1): 252 rows, SHA-256 `786e72ad2179f88b3d1c9418dd84038154bfae39c4da18c819db9d18754ecbcc` (by `eval/check_test_set.py`, line ends read as LF; 0 problems). Any later change gets a new version and hash in `CLAUDE.md` section 13, and every score names the version it used |
+| **Source** | 252 requests written by **Claude** (Anthropic), in the claude.ai chat, on 2026-10-29, `author = ai`: T001–T222 first, then T223–T252 (15 `gas` + 15 `appliances`) from the prompt [`docs/prompts/test_set_extra_rows.md`](prompts/test_set_extra_rows.md). Momo decided every label change. ⚠️ The brief says the test set is *"written and labeled by the interns themselves"*: Momo changed this (Step 2.1); instructor approval pending |
+| **Terms** | [Anthropic Consumer Terms](https://www.anthropic.com/legal/consumer-terms) (effective 2025-10-08, read 2026-10-29): Anthropic assigns the outputs to the user (§4); the services may not be used *"to develop or train any artificial intelligence or machine learning algorithms or models"* that compete with them (§3). We only **measure** with these messages, never train on them (rule 5). Anthropic may train on chat inputs and outputs unless the user opts out (§4): our prompts held only our rules and invented data. Our own work on top (labels, fixes): no license chosen yet (D3 A, section 2) |
 
-### How it will be made (plan)
+### How it was made (Step 2.1)
 
-- Momo writes each message the way a resident would, in Egyptian Arabic, English, and both
-  mixed, and labels it with the [labeling guide](labeling_guide.md), version 1.
-- It includes hard cases: vague messages, two problems in one message, gas and other
-  `high` cases, every category.
-- All details are fake.
+1. **Written** by Claude (chat) **without** our labeling guide or registry: 222 rows, with tags for
+   hard cases (Franco-Arabic, Arabic digits, typos, two problems, vague, …). The untouched file is
+   kept as `eval/test_set_original.csv`.
+2. **Checked by a script:** `eval/check_test_set.py` checks the columns, labels and tags, the clean
+   form of every expected field (design notes §1), the registry, and that every expected value
+   appears in the text. First run: 501 problems in 189 rows.
+3. **Labels reviewed** against the [labeling guide](labeling_guide.md): proposed by Claude Code,
+   decided by Momo. 43 rows changed: 39 labels broke the guide (18%), plus 2 dripping-tap rows,
+   1 tag and 1 row too vague for a label. The guide became v1.2 (4 cases made clear).
+4. **Fitted to the registry** (D2, D3): the 3 invented compounds → our 4; building numbers →
+   letters; every unit → a real registry unit (112 of 150 didn't exist). Only location words
+   changed (167 rows), listed before/after in `eval/test_set_review.md` and read by Momo.
+   Phones → E.164 in the `phone` column (D4).
+5. **Realism review:** Momo read 30 random rows (seed 42) and marked none.
+6. **30 rows added** (D1 A): `gas` had 3 rows, `appliances` 0. Claude (chat) wrote 15 + 15 from a
+   prompt with our rules (no test message); all passed the checker and the label review the first time.
 
-### To fill in when it exists
+### Size and columns
 
-Count · counts per category, urgency and language · labeling guide version used · date ·
-whether a second person labeled a part, and how much they agreed.
+252 rows, 12 columns: `id, text, language, category, urgency, compound, building, unit_number,
+name, phone, author, notes`. The expected fields are the clean values the bot should extract;
+**empty = not in the text**, so a value returned for an empty field is a hallucination.
+
+| | Counts |
+|---|---|
+| Category | electricity 48, plumbing 46, ac 36, carpentry 30, pest_control 30, general 28, gas 18, appliances 15, none 1 (too vague, D5 A) |
+| Urgency | low 86, medium 117, high 48, none 1 |
+| Language | Egyptian Arabic 138 (21 of them Franco-Arabic), English 77, mixed 37 |
+| Tags | short_compound 53, arabic_digits 48, franco 21, gas 18, check_guide 17, very_short 15, long 9, two_problems 8, typo 7, self_correction 6, vague 6, water_heater 3 |
+| Expected fields | full location (compound + building + unit) 99, unit 164, building 159, compound 131, phone 77, name 60, none at all 34 |
+
+### Where it is stored
+
+`eval/test_set.csv` on Momo's laptop, **not in git** (D6 A): its invented phone numbers may belong
+to real people. Next to it, also git-ignored: the untouched original, the 30 extra rows as sent
+(`test_set_extra.csv`) and the location review. Momo keeps a backup and sends the file to the
+instructor directly. The checker and its tests are in git.
 
 ### Intended use
 
-The **final scores only**: classifier F1 (target ≥ 0.85), the ML vs LLM comparison, and
-extraction checks.
+The **final scores only**: classifier F1 (target ≥ 0.85), the ML vs LLM comparison, and the
+extraction checks (all unit fields ≥ 90%, hallucination rate). Every score says "on an AI-written
+test set".
 
 ### Not for
 
-**Never for training, and never as an example in a prompt** (rule 5, `CLAUDE.md` section 9).
-If a test message is used for training even once, every score after that is too high.
+**Never for training, never as an example in a prompt, never for tuning** (rule 5, `CLAUDE.md`
+section 9): choices are made on the validation set. If a test message is used for training even
+once, every score after that is too high.
 
-### Known limits and bias (expected)
+### Known limits and bias
 
-| Limit | Why it matters |
-|---|---|
-| **One writer, one style** | Real residents write in many ways. The scores hold for Momo's style |
-| **The same person writes the guide, the synthetic prompts and the test set** | Test messages may look like training messages, so the scores look better than real life |
-| **One labeler** | No second opinion on borderline labels. Idea: a second person labels a part, and we measure how much the two agree |
-| **No real resident message** | This is the brief's main data risk (below) |
+| Limit | Why it matters | What we do |
+|---|---|---|
+| **AI-written**, not by residents or interns | It may share the "AI style" of the synthetic training data, so the scores look better than real life | Training data from a different model family (never Claude); the Step 2.6 leakage check; "AI-written" next to every score; optional: 20–40 messages by real people, scored apart |
+| **One shape repeats**: problem → location → phone, at the end; few greetings (realism review) | Real residents mix the order and send details in several messages, so extraction may look easier than real life | Say it in the reports; the 30 extra rows vary the shape |
+| **Written and reviewed by one model family**: Claude (chat) wrote it; Claude Code proposed the label and location fixes | Shared blind spots | Momo decided every change and read 30 random rows |
+| **Claude Code has read every row** | Its Step 2.6 prompt drafts may reuse test wording | The leakage check; Momo reviews the Step 2.6 prompts |
+| **One labeler** | No second opinion on borderline labels | Open (`CLAUDE.md` section 14): a second person labels a part, and we measure agreement |
+| **Small classes**: appliances 15, gas 18 | One mistake moves their F1 a lot | Report every class, macro and weighted F1, and a confidence interval (Step 2.7) |
+| **Empty or rare pairs**: `ac` + `high` and `appliances` + `high` have 0 rows (by the guide, a device is never the danger); `carpentry` + `high` and `pest_control` + `high` have 2 each | The test says little about these pairs | Expected from the guide (D8 A); say it in the model report |
+| **Some pairs of rows** tell the same problem in two languages (for example T110 / T111) | They are not fully independent samples | A small effect; say it |
 
 ---
 
@@ -438,11 +472,11 @@ test set; report the gap between synthetic and real-style performance."*
 
 | Gap | What it can do to the results | What we do about it | Where we measure or report it |
 |---|---|---|---|
-| **No real resident messages** anywhere | All scores describe "resident-style" text, not real residents | Hand-written test set; compare scores on synthetic vs test data (the brief's "gap") | Model report |
+| **No real resident messages** anywhere | All scores describe "resident-style" text, not real residents. The test set is AI-written too (section 8), so the brief's "gap" is only partly measured | Compare scores on synthetic vs test data (the brief's "gap"); optional: 20–40 messages by real people, scored apart | Model report |
 | **NYC is not Egypt**; heat-heavy, no cooling, no gas smell (section 3) | The classifier mixes up AC types, and misses gas | Seed lists; 70/20/10 AC mix; test set has gas and cooling cases | Score per category (Phase 4) |
 | **English-only 311; Arabic only from an LLM** (sections 3, 6, 7) | Weaker on real Egyptian Arabic | Momo checks Arabic samples; separate scores per language | Model report |
-| **One author for the guide, prompts and test set** (section 8) | Scores too optimistic | Write the test set in Momo's own words, not copied from synthetic messages | Model report, limits |
-| **Weak urgency labels** (section 3) | Urgency less reliable than category | Hand labels in the test set | Separate urgency scores |
+| **The test set and the training data are both AI-written** (sections 6, 8) | Scores too optimistic | Different model families (Claude vs Groq / Gemini); the Step 2.6 leakage check; Momo reviews the generation prompts | Model report, limits |
+| **Weak urgency labels** (section 3) | Urgency less reliable than category | Test-set labels checked against the guide, decided by Momo (section 8) | Separate urgency scores |
 | **Unbalanced classes** (gas 1.2%) | Small classes are weak, hidden by a good total | Report every class, and macro and weighted F1 | Model report |
 | **LLM writes the data and is also the zero-shot rival** (section 6) | The ML vs LLM comparison is not fair | Different models, or say it clearly | ML vs LLM comparison |
 | **One speaker for the voice notes** (section 5) | Transcription scores too optimistic | The bot always shows the transcript (D11 A) | Whisper report; final report |
@@ -467,3 +501,4 @@ test set; report the gap between synthetic and real-style performance."*
 |---|---|---|
 | 1 | 2026-10-28 | First version (Step 1.10): 3 sources in use (NYC 311, unit registry, voice notes), 3 planned (synthetic, translated, test set) |
 | 1.1 | 2026-10-28 | §3 terms checked by Momo on the official site: §23-504(a) and §23-502(d), full quotes. The unofficial copy had an older §23-502(d) ("registration requirement, license requirement"); fixed. Added the city's right to ask for source, version and changes, so we now name them when we share |
+| 1.2 | 2026-10-29 | Step 2.1: §8 is now the AI-written test set (252 rows by Claude chat; how it was checked and fixed; counts; Anthropic terms read on the official page; limits measured). Rule 5 adds "a different model family". §2, §3 and §9 follow. Same day: the test set is frozen as v1 (252 rows, hash in §8) |
