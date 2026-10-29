@@ -172,7 +172,7 @@ uv sync --locked                          # fail if uv.lock is out of date (what
 git switch main                           # start each step from the newest main ...   ✅ works (Step 2.0)
 git pull                                  #   ... with the merged PRs from GitHub      ✅ works (Step 2.0)
 git switch -c step-2.1-test-set           # one branch per step: step-<n>-<short-title>   ✅ works (Step 2.0)
-git push -u origin step-2.1-test-set      # first push of the branch (Claude asks first), then open the PR on GitHub
+git push -u origin step-2.1-test-set      # first push of the branch (Claude asks first), then open the PR on GitHub   ✅ works (Step 2.0)
 git diff main...step-2.1-test-set         # what the PR changes (Claude's review reads this)
 git branch -D step-2.1-test-set           # only after GitHub shows "Merged": -D, because git can't see a squashed branch as merged
 git fetch --prune                         # forget branches that were deleted on GitHub
@@ -354,7 +354,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 
 **Dashboard & DevOps**
 - [ ] Write a Dockerfile for the app
-- [ ] Make CI run on every PR
+- [x] Make CI run on every PR (`pull_request:` since Step 1.3; since Step 2.0 the ruleset `protect-main` makes `main` need a PR and a green "Lint, format and test"; a failing PR is tested in Step 2.11)
 - [ ] Run Metabase locally and connect it to Postgres with fake rows
 
 **End of phase:** each piece works on its own. Text goes in, valid JSON comes out, and there is a baseline F1 number.
@@ -552,6 +552,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 | 2026-10-29 | **Git workflow** (Step 2.0 D1 A, D2 A): one branch per step, made from an up-to-date `main`, named `step-<n>-<short-title>` (e.g. `step-2.1-test-set`); one PR per step; **squash and merge**, PR title = a Conventional Commit with the step number (e.g. `feat: redis session store (step 2.3)`). Ends Phase 1's direct commits to `main`. Claude still asks before each commit and push | Brief: "All interns review each other's pull requests". `main` always passes CI; each step = one commit on `main`, easy to undo; the PR page shows the instructor the whole step. Cost: after a squash, git can't see the branch as merged, so it is deleted with `git branch -D`, only after GitHub shows "Merged" |
 | 2026-10-29 | **`main` protected** (D3 A): GitHub ruleset `protect-main` on the default branch: PR required (0 approvals), check "Lint, format and test" must pass, no force push, no deletion, empty bypass list. Repo settings: squash merging only, default message = PR title, head branches deleted after merge | CI can't be skipped. 0 approvals, because GitHub never lets an author approve their own PR (1 would lock Momo out). Cost: even a one-line doc fix needs a PR |
 | 2026-10-29 | **PR reviews** (D4 A): Claude reviews in the chat from `git diff main...<branch>` (each finding with `file:line`, marked "must fix" or "suggestion"; helper prompt "Review my pull request" in `phase2.md`); Momo writes a 1–2 line summary on the PR and merges. No GitHub CLI (`gh`) for now | No new tool; the summary is in Momo's words. Limit: Claude helped write the code, so it is a second look, not an independent review; the instructor is the independent reviewer |
+| 2026-10-29 | GitHub's automatic Copilot review of PRs is turned off (Step 2.0 D5 A; Momo: "do what you recommend"). It came from "automatic review settings", not from the ruleset | D4 A: Claude reviews in the chat. A tool outside our stack (rule 9); with no quota it only posts "unable to review" on every PR |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -595,9 +596,9 @@ Format:
 - Phase · role: Phase 2 · All roles
 - Files: `docs/prompts/phase2.md` (new, Momo's); CLAUDE.md sections 5, 6, 12, 13, 15. Branch `step-2.0-kickoff` (the first step on a branch).
 - How it works: no code. Phase 1 checked: all its outputs exist, pytest 102 passed, ruff clean, `main` = `origin/main`. Phase 2's goal, tasks per role and Phase 3 links explained; train / validation / test, data leakage and "never tune on the test" taught; the step order and the git workflow logged.
-- Status: ⏸️ CLAUDE.md updated; waiting for the quiz answers, Momo's OK to commit + push + open the first PR, and the `protect-main` ruleset (D3 A). "Make CI run on every PR" stays unticked until the ruleset is checked.
-- Known issues / TODO: 7 places where `phase2.md` disagrees with section 13 are listed under Phase 2 in section 12 (section 13 wins). For Step 2.1: decide if Claude may read the test-set rows (risk: their wording leaks into the Step 2.6 synthetic-data prompts). `gh` is not installed (D4 A: not needed).
-- What Momo did: saved `phase2.md`; chose D1 A, D2 A, D3 A, D4 A (Claude's recommendations).
+- Status: ✅ quiz 5/5 (small additions given). Ruleset `protect-main` read back from GitHub's API: deletion and force-push blocked, PR with 0 approvals, required check "Lint, format and test". First PR #1: both runs (push + pull_request) green, the merge box offers only "Squash and merge". Not seen: a merge blocked by a red check (planned in Step 2.11).
+- Known issues / TODO: 7 places where `phase2.md` disagrees with section 13 are listed under Phase 2 in section 12 (section 13 wins). For Step 2.1: decide if Claude may read the test-set rows (risk: their wording leaks into the Step 2.6 synthetic-data prompts). Unclear: the ruleset field `require_extra_approval_for_unattributed_changes: true` (not found in GitHub's docs on 2026-10-29; PR #1 stayed mergeable). Copilot's automatic review (failed on PR #1: no quota) → off (D5 A), Momo switches it off in the GitHub settings. `gh` is not installed (D4 A: not needed).
+- What Momo did: saved `phase2.md`; chose D1 A, D2 A, D3 A, D4 A, D5 A (Claude's recommendations); answered the quiz; set up the ruleset and the merge settings; opened PR #1.
 ---
 
 ## 16. Stretch list (ideas not in the brief)
