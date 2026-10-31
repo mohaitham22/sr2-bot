@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -298,6 +298,13 @@ def test_a_refused_insert_keeps_the_rest_of_the_test(db: RunDb) -> None:
     db(scenario)
 
 
+def our_log_line(error: BaseException) -> str:
+    """The line our logging would write for logger.exception("saving failed") with this error."""
+    exc_info = (type(error), error, error.__traceback__)  # what logger.exception() passes
+    record = logging.LogRecord("test", logging.ERROR, __file__, 1, "saving failed", None, exc_info)
+    return RedactingFormatter(LOG_FORMAT, secrets=[]).format(record)
+
+
 def test_a_refused_row_never_reaches_the_log(db: RunDb) -> None:
     """Privacy (Step 2.2, privacy A): Postgres sends the refused row back as DETAIL, with the
     name and phone in it. The raw traceback shows it; our log formatter must not."""
@@ -309,17 +316,32 @@ def test_a_refused_row_never_reaches_the_log(db: RunDb) -> None:
                 session.add(User(telegram_user_id=3, name=name, phone=bad_phone))
                 await session.flush()
 
-        error = caught.value
-        raw = "".join(traceback.format_exception(error))
+        raw = "".join(traceback.format_exception(caught.value))
         assert name in raw  # the leak is real: without the formatter, the name would be logged
-        exc_info = (type(error), error, error.__traceback__)  # what logger.exception() passes
-        record = logging.LogRecord(
-            "test", logging.ERROR, __file__, 1, "saving failed", None, exc_info
-        )
-        line = RedactingFormatter(LOG_FORMAT, secrets=[]).format(record)
+        line = our_log_line(caught.value)
         assert name not in line
         assert bad_phone not in line
         assert "ck_users_phone_e164" in line
+
+    db(scenario)
+
+
+def test_a_wrong_type_value_never_reaches_the_log(db: RunDb) -> None:
+    """PR #3 review, M1: for a value of the wrong type (a name where a number belongs), asyncpg
+    puts the value itself into its error text. The error shows it; our log formatter must not."""
+    name = "Test Wrongtype Name"
+
+    async def scenario(session: AsyncSession) -> None:
+        with pytest.raises(DBAPIError) as caught:
+            async with session.begin_nested():
+                # On purpose: a str where the int Telegram ID belongs
+                session.add(User(telegram_user_id=name, name=FAKE_NAME, phone=FAKE_PHONE))
+                await session.flush()
+
+        assert name in str(caught.value)  # the leak is real, even without a traceback
+        line = our_log_line(caught.value)
+        assert name not in line
+        assert "query argument $1" in line  # which argument it was stays
 
     db(scenario)
 

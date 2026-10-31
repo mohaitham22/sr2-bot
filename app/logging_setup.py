@@ -12,14 +12,20 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 # (Step 2.2, privacy A). The rule's name stays in the line before it.
 POSTGRES_DETAIL = re.compile(r"DETAIL:.*")  # "." stops at the end of the line
 HIDDEN_DETAIL = "DETAIL: [hidden: may contain personal data]"
+# A value of the wrong type (e.g. a name where a number belongs): asyncpg puts the VALUE itself
+# into its error, e.g. "invalid input for query argument $1: '<value>' (...)", also for many
+# rows at once ("... $1 in element #0 of executemany() sequence: '<value>' ..."). Keep only
+# which argument it was (PR #3 review, M1).
+QUERY_ARGUMENT = re.compile(r"(query argument \$\d+[^:\n]*:).*")
+HIDDEN_ARGUMENT = r"\1 [hidden: may contain personal data]"
 
 
 class RedactingFormatter(logging.Formatter):
-    """Hide secrets and Postgres DETAIL lines in the final log line, tracebacks included.
+    """Hide secrets and database values in the final log line, tracebacks included.
 
     A second safety net (CLAUDE.md section 13, D4 B): our code never logs secrets or personal
     data, but an error message from a library might (e.g. a request URL that contains the bot
-    token, or a database error with the refused row).
+    token, a database error with the refused row, or a value of the wrong type).
     """
 
     def __init__(self, fmt: str, secrets: list[str]) -> None:
@@ -30,6 +36,7 @@ class RedactingFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         line = super().format(record)
         line = POSTGRES_DETAIL.sub(HIDDEN_DETAIL, line)
+        line = QUERY_ARGUMENT.sub(HIDDEN_ARGUMENT, line)
         for secret in self._secrets:
             line = line.replace(secret, "***")
         return line

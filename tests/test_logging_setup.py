@@ -3,6 +3,8 @@
 import logging
 import sys
 
+import pytest
+
 from app.logging_setup import LOG_FORMAT, RedactingFormatter
 
 FAKE_TOKEN = "123456789:FAKE-token-for-tests-only"
@@ -76,6 +78,28 @@ def test_postgres_detail_hidden_in_chained_traceback() -> None:
     assert "direct cause" in line  # the chain is printed ...
     assert FAKE_NAME not in line  # ... but not the row
     assert FAKE_PHONE not in line
+
+
+@pytest.mark.parametrize(
+    "error_text",
+    [
+        # asyncpg's text for a value of the wrong type: one row, and many rows at once
+        f"invalid input for query argument $3: '{FAKE_PHONE}' (expected str, got int)",
+        (  # one string in two parts (parentheses: not a missing comma)
+            f"invalid input for query argument $2 in element #0 of executemany() sequence: "
+            f"'{FAKE_NAME}' ('str' object cannot be interpreted as an integer)"
+        ),
+    ],
+)
+def test_wrong_type_value_hidden(error_text: str) -> None:
+    formatter = RedactingFormatter(LOG_FORMAT, secrets=[])
+
+    line = formatter.format(make_record("saving failed: %s", error_text))
+
+    assert FAKE_NAME not in line
+    assert FAKE_PHONE not in line
+    assert "query argument $" in line  # which argument it was stays: enough to debug
+    assert "[hidden: may contain personal data]" in line
 
 
 def test_empty_secret_is_ignored() -> None:
