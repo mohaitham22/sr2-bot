@@ -1,7 +1,8 @@
 """Step 1.8: the label mapping. NYC 311 housing problem -> our category and urgency.
 
 docs/labeling_guide.md explains the rules in words; this file is the same rules as code.
-Change a label HERE, nowhere else: ml/prepare_311.py (and later the synthetic data) read it.
+Change a mapping rule HERE, nowhere else: ml/prepare_311.py (and later the synthetic data) read it.
+The label names themselves live in app/schemas/labels.py (Step 2.2 D3 A).
 
 A 311 problem has 3 levels: complaint_type / descriptor / descriptor_2, for example
 WATER LEAK / HEAVY FLOW / AT WALL OR CEILING. A rule names the 3 levels; ANY matches every value.
@@ -10,17 +11,14 @@ of complaint in a newer export never gets a label by accident.
 """
 
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import Literal
 
-# The brief's 6 categories + gas and appliances (Step 1.8 D5/D6 B)
-Category = Literal[
-    "plumbing", "electricity", "ac", "carpentry", "pest_control", "gas", "appliances", "general"
-]
-Urgency = Literal["low", "medium", "high"]
+# Re-export: ml/prepare_311.py, eval/check_test_set.py and the tests import CATEGORIES and
+# URGENCIES from here. This file doesn't use them, so "noqa: F401" tells ruff that the unused
+# import is on purpose.
+from app.schemas.labels import CATEGORIES, URGENCIES, Category, Urgency  # noqa: F401
+
 DropReason = Literal["two_categories", "not_in_egypt", "not_maintenance", "bad_row"]
-
-CATEGORIES: tuple[Category, ...] = get_args(Category)
-URGENCIES: tuple[Urgency, ...] = get_args(Urgency)
 
 ANY = "*"  # in a rule: any value at this level
 

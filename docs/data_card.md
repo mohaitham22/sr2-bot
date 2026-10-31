@@ -1,6 +1,6 @@
 # Data card
 
-**Version 1.2 · 2026-10-29 · Step 2.1**
+**Version 1.3 · 2026-10-31 · Step 2.2**
 
 This card lists **every data source** of the project: where it comes from, its license or terms,
 how it was made, what it may be used for, and what it does badly. The brief asks for it
@@ -209,9 +209,13 @@ build them again you need the same export and 2 commands:
 because it is fictional. It is made **only by the script**, never edited by hand. A golden-file
 test (`tests/test_generate_units.py`) checks in CI that the committed CSV equals a fresh run.
 
+**In Postgres** since Step 2.2: `uv run python -m app.db.seed.load_units` copies it into the
+tables `compounds` (4 rows) and `units` (188 rows). It only adds missing rows and stops if the
+database differs from the CSV, so the CSV stays the one source.
+
 ### Intended use
 
-- Fill the Postgres table `units` (Phase 2–3).
+- Fill the Postgres tables `compounds` and `units` (done in Step 2.2, `load_units.py`).
 - Check the unit that the LLM extracts: does `B-204` exist in this compound?
 - Offer returning users their saved unit: *"Is this for Unit B-204?"*
 - The dashboard chart "top units and buildings", and the demo data (Phase 6).
@@ -502,3 +506,4 @@ test set; report the gap between synthetic and real-style performance."*
 | 1 | 2026-10-28 | First version (Step 1.10): 3 sources in use (NYC 311, unit registry, voice notes), 3 planned (synthetic, translated, test set) |
 | 1.1 | 2026-10-28 | §3 terms checked by Momo on the official site: §23-504(a) and §23-502(d), full quotes. The unofficial copy had an older §23-502(d) ("registration requirement, license requirement"); fixed. Added the city's right to ask for source, version and changes, so we now name them when we share |
 | 1.2 | 2026-10-29 | Step 2.1: §8 is now the AI-written test set (252 rows by Claude chat; how it was checked and fixed; counts; Anthropic terms read on the official page; limits measured). Rule 5 adds "a different model family". §2, §3 and §9 follow. Same day: the test set is frozen as v1 (252 rows, hash in §8) |
+| 1.3 | 2026-10-31 | Step 2.2: the registry (§4) is also loaded into the Postgres tables `compounds` and `units` by `app/db/seed/load_units.py` |
