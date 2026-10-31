@@ -8,6 +8,10 @@ Changing a label is more than an edit here: the database has CHECK rules with th
 old rows may use the old label. It needs a hand-written migration (CLAUDE.md section 13,
 2026-10-31), because Alembic's autogenerate does not see CHECK changes. Change
 docs/labeling_guide.md and ml/label_mapping.py in the same PR.
+
+Step 2.3: the language codes and message roles live here too, because the database (CHECK rules)
+and the Redis session store (app/memory/session_store.py) must allow the same values. The same
+migration rule applies when they change.
 """
 
 from typing import Literal, get_args
@@ -19,8 +23,15 @@ Category = Literal[
 Urgency = Literal["low", "medium", "high"]
 # Only for ac, which covers cooling + heating + ventilation (Step 1.8 D1 A). Other categories: none
 Subcategory = Literal["cooling", "heating", "ventilation"]
+# The language of a request and of the bot's replies (design notes 1.8). Not the test set's
+# "mixed": eval/check_test_set.py has its own list for that column.
+Language = Literal["ar", "en"]
+# Who wrote a message: the resident or the bot (the messages table and the Redis history)
+MessageRole = Literal["user", "bot"]
 
 # The same values as tuples, for loops and CHECK rules (get_args reads them out of the Literal)
 CATEGORIES: tuple[Category, ...] = get_args(Category)
 URGENCIES: tuple[Urgency, ...] = get_args(Urgency)
 SUBCATEGORIES: tuple[Subcategory, ...] = get_args(Subcategory)
+LANGUAGES: tuple[Language, ...] = get_args(Language)
+MESSAGE_ROLES: tuple[MessageRole, ...] = get_args(MessageRole)

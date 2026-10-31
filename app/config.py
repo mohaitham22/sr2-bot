@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr, field_validator
+from pydantic import PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Project root (the folder that holds pyproject.toml), so .env is found from any working directory
@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # Telegram user IDs whose voice notes the bot saves for testing (D2 A). A JSON list in .env,
     # e.g. [123456789]. Not set: nobody's voice notes are saved. Real IDs never go in the repo.
     voice_save_user_ids: frozenset[int] | None = None
+
+    # Session memory in Redis (Step 2.3). These two have defaults; .env can change them.
+    # PositiveInt: a whole number > 0, so "0", "-5" or "abc" in .env stops the app at startup.
+    # Seconds without a new message before the session and its history are deleted. Every new
+    # message starts the timer again (sliding expiry, D4 A). 1800 = the brief's "30 minutes idle".
+    session_ttl_seconds: PositiveInt = 1800
+    # How many recent messages the history keeps; one message (user or bot) = one turn (D3 A).
+    # 10 is a placeholder until the token budget is set (section 14). Older ones: debt T12.
+    history_max_messages: PositiveInt = 10
 
     @field_validator("stt_model_dir")
     @classmethod

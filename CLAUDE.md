@@ -63,7 +63,7 @@ Start every answer with 2–3 sentences in very simple English saying what we ar
 | Classifier | scikit-learn TF-IDF + LogisticRegression (v1) → SetFit or multilingual BERT (v2) | Train v2 on Colab/Kaggle free GPU |
 | Experiments | MLflow (local) | Log every training run |
 | Database | PostgreSQL 16 + SQLAlchemy 2 + Alembic | Persistent data |
-| Session memory | Redis 7 (`redis.asyncio`) | Short-term state |
+| Session memory | Redis 7 (`redis.asyncio` from redis-py 8) | Short-term state; `app/memory/session_store.py` (Step 2.3) |
 | Dashboard | Metabase open-source | Reads Postgres directly |
 | LLM tracing | Langfuse Cloud (Hobby, free) | No personal data in traces |
 | Containers | Docker Engine / Rancher Desktop | Not Docker Desktop on the work laptop (license) |
@@ -113,7 +113,8 @@ app/
   graph/             # LangGraph state, nodes, edges
   services/          # stt.py, llm.py, extraction.py, classifier.py
   prompts/           # prompt files (*.md), versioned; never inline long prompts
-  memory/            # Redis session store
+  memory/            # session_store.py: the Redis session + history (Step 2.3; not "session.py":
+                     #   app/db/session.py is SQLAlchemy's database session)
   db/                # models.py (7 tables), session.py (URL + engine), repositories.py (Step 2.2)
     seed/            # mock unit registry: generate_units.py + units.csv (committed; Step 1.9),
                      #   load_units.py (CSV -> Postgres; Step 2.2)
@@ -155,6 +156,7 @@ Exists since Step 1.12: `docs/phase1_summary.md` (one page for the instructor: w
 Exists since Step 2.0: `docs/prompts/phase2.md` (Momo's step prompts for Phase 2, Steps 2.0–2.13).
 Exists since Step 2.1: `eval/check_test_set.py` (checks every test-set row against the guide, design notes §1 and the registry; prints coverage + SHA-256; exit code 1 on a problem), `tests/test_check_test_set.py` (a tiny fake CSV, so CI never needs the real file), `docs/prompts/test_set_extra_rows.md`. Git-ignored, on Momo's laptop only: `eval/test_set.csv` (252 rows), `eval/test_set_original.csv` (as Claude chat wrote it), `eval/test_set_extra.csv` (the 30 rows as sent), `eval/test_set_review.md` (the location before/after).
 Exists since Step 2.2: `app/schemas/labels.py` (labels, one place; `ml/label_mapping.py` imports them), `app/db/models.py`, `app/db/session.py`, `app/db/repositories.py` (ticket number), `app/db/seed/load_units.py`, `alembic.ini`, `migrations/` (`env.py`, `script.py.mako`, `README`, `versions/2026_10_31_1454-db87004e7de1_create_tables.py` = migration 1), `tests/conftest.py` (the test database `srbot_test`), `tests/test_conftest.py`, `tests/test_labels.py`, `tests/test_session.py`, `tests/test_models.py`, `tests/test_repositories.py`, `tests/test_load_units.py`, `tests/test_migrations.py`. `logging_setup.py` also hides Postgres `DETAIL:` lines and asyncpg's wrong-type values. The dev database `srbot` is at migration 1 with the registry loaded (4 compounds, 188 units).
+Exists since Step 2.3: `app/memory/session_store.py` (the models `Session`, `CollectedFields`, `HistoryMessage`; `make_redis()`; the class `SessionStore` with `load`, `save`, `add_message`, `get_history`, `clear`; the errors `SessionStoreUnavailable`, `SessionDataLost`), `tests/test_session_store.py`. `tests/conftest.py` also has the Redis fixtures (`redis_db`, `test_redis_url`: database 15 + the guard). `config.py` has `session_ttl_seconds` and `history_max_messages`; `labels.py` has `Language` and `MessageRole` (moved from `models.py`). New dependency: `redis`.
 
 ---
 
@@ -166,6 +168,8 @@ docker compose ps                         # status: both must say (healthy)     
 docker compose config --quiet             # check the file + .env (never without --quiet: it prints the password)   ✅ works (Step 1.2)
 docker compose exec postgres psql -U srbot -d srbot   # SQL shell (\q to quit)  ✅ works (Step 1.2)
 docker compose exec redis redis-cli ping  # expect PONG                         ✅ works (Step 1.2)
+docker compose exec redis redis-cli -n 15 # Redis shell on the TEST database 15 (prompt shows [15]); `quit` to leave   ✅ works (Step 2.3)
+docker compose exec redis redis-cli -n 15 DBSIZE   # keys in database 15: 0 after the tests   ✅ works (Step 2.3)
 docker compose down                       # stop + delete containers; volumes (data) are KEPT   ✅ works (Step 1.2)
 # docker compose down -v                  # ALSO deletes the volumes = all data. Ask Momo first.
 uv run alembic upgrade head               # apply all DB migrations (to DATABASE_URL)   ✅ works (Step 2.2)
@@ -209,6 +213,8 @@ Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run t
 Note: PowerShell 5.1 removes double quotes *inside* arguments passed to programs like `docker` (e.g. `sh -c '... "x" ...'`). Keep commands simple (as above), or use Git Bash for nested quotes.
 Note: Rancher Desktop must be running before any `docker` command.
 Note: pytest's database tests need Postgres running: they use `srbot_test`, never `srbot`. Without `DATABASE_URL` (CI until Step 2.11) they are skipped; with it but Postgres off, they fail with what to start.
+Note: pytest's Redis tests work the same way: database 15, never 0 (the app's), emptied before and after each test; skipped without `REDIS_URL`; an error with what to start when Redis is off.
+Note: in `redis-cli`, never run `MONITOR` or `KEYS *` / `GET` on database 0 while real users talk to the bot: they show message texts, names and phones (section 9). Database 15 holds only fake test data.
 Note: only one copy of the bot can poll at a time; a second one gets a `Conflict` error from Telegram. The bot needs no Docker.
 Note: voice notes are saved to `eval/voice/raw/` only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, a JSON list like `[123456789]`; the brackets are required). Your ID = the `chat_id` in the bot's log for your private chat.
 Note: messages sent while the bot is off wait at Telegram (pending updates) and all arrive at once when it starts.
@@ -247,6 +253,8 @@ Metabase reads only `compounds`, `units`, `predictions` and the view `dashboard_
 
 - Recognize returning users by Telegram user ID, and offer their saved unit ("Is this for Unit B-204?").
 - Keep each LLM call within a fixed token budget: trim or summarize history.
+
+Code (Step 2.3): `app/memory/session_store.py`. Every write (save the session, add a message) restarts the timer of **both** keys (sliding expiry); `clear()` deletes both (submit, `/reset`, `/forget`). The history keeps the last `HISTORY_MAX_MESSAGES` messages (one message = one turn); older ones are dropped, not summarized yet (debt T12).
 
 ---
 
@@ -369,7 +377,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 
 **Backend & Memory**
 - [x] Build the SQLAlchemy models and Alembic migrations (Step 2.2: 7 tables, migration 1, the registry loaded, tests on `srbot_test`)
-- [ ] Build the Redis session store (`session:{chat_id}`, 30-minute expiry)
+- [x] Build the Redis session store (`session:{chat_id}`, 30-minute expiry) (Step 2.3: session + history, sliding expiry, tests on Redis database 15)
 - [ ] Define the LangGraph state
 
 **Dashboard & DevOps**
@@ -395,7 +403,8 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 **Backend & Memory**
 - [ ] Wire FastAPI and the full LangGraph flow together
 - [ ] Recognize returning users ("Is this for Unit B-204?")
-- [ ] Keep the last N turns and summarize older ones
+- [ ] Keep the last N turns and summarize older ones (debt T12)
+- [ ] Handle session-store errors (Step 2.3): Redis down or too slow → "please try again"; broken session data → tell the user the conversation restarted
 - [ ] Add ticket numbers and the `/status`, `/reset`, and `/forget` commands
 - [ ] Save each SR and its predictions
 
@@ -592,13 +601,22 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 | 2026-10-31 | **Database errors and personal data** (Step 2.2, privacy A). Found with fake data on `srbot_test`: when a rule refuses a row, Postgres sends the whole row back as `DETAIL: Failing row contains (…, name, phone, …)`. `hide_parameters` doesn't hide it (it is in asyncpg's error, the *cause* in the chain, which every traceback prints), and the Postgres server log had it too. Fixed now: `RedactingFormatter` replaces every `DETAIL:` line in every log line, tracebacks included; Postgres runs with `log_error_verbosity=terse` (`docker-compose.yml`). Tested with a real refused insert. PR #3 review (M1) found a second path: for a value of the wrong type, asyncpg writes the value itself into its error (`invalid input for query argument $1: '<value>'`), even in `str(error)`; the formatter now hides everything after `query argument $N:` too, tested with a real wrong-type insert. The rest is debt T11 (Phase 3) | Section 9: name and phone never in logs or error messages. Cost: debugging a refused row shows the rule's name, not the row |
 | 2026-10-31 | The view `dashboard_service_requests` and the user `metabase_reader` come in Step 2.12, not in migration 1 (D7 A). The password is read from `.env` at run time and is never written in a migration file. Step 2.12 explains whether a database user (server-wide, not part of one database) belongs in a migration or in a setup script | Step 2.12 owns Metabase and its `.env` values. Migration files are committed to the public repo |
 | 2026-10-31 | Smaller Step 2.2 choices: `alembic.ini` has no database URL (`env.py` reads it through `session.py`); migration file names start with the date; a ruff hook formats every new migration, and `script.py.mako` uses modern type hints; `load_units.py` only inserts missing rows (`ON CONFLICT DO NOTHING`), never updates or deletes, and stops with nothing saved when the database differs from the CSV; the test helpers (`run_in_rollback`, fake rows) live in `tests/conftest.py`; no `relationship()` in the models yet; `created_at` comes from the database (`now()`), never from Python | The URL holds the password, and `alembic.ini` is committed. Files sort in the order they were made; a new migration passes CI as written. A unit may already have SRs, so the seed never changes one; a person decides about a difference. Async lazy loading fails (`MissingGreenlet`), so joins are written where they are needed (Phase 3). One clock (the database's) for every time |
+| 2026-10-31 | New main dependency `redis>=8.1.0,<9` (redis-py, MIT; `redis.asyncio` is built in) (Step 2.3 D1). Note: our `redis:7` image is 7.4.11; since 7.4 the Redis *server* is RSALv2/SSPLv1 ("source-available", not open source): free for our own app, but not for selling Redis as a service. Valkey (BSD) is the open-source fork if this ever matters | The brief names Redis for session memory; the official client, with async built in. `<9`: a new major version can break the API |
+| 2026-10-31 | **Session-store tests use the real Redis** (D2 A): database **15** in the same container (the app uses 0, the number at the end of `REDIS_URL`); emptied with `FLUSHDB` before and after each test; guard: the fixtures refuse any database number other than 15. Skipped when `REDIS_URL` is not set (CI until Step 2.11); fail with a clear message when Redis is off. No `fakeredis` | Tests the real TTL, the real transactions and our real Redis version; no new dependency; the same pattern as the Postgres tests (Step 2.2 D4 A). Cost: CI runs none of them until Step 2.11 adds a Redis service container |
+| 2026-10-31 | **History length** (D3 A): one turn = one message (user or bot) = one Redis list item. `HISTORY_MAX_MESSAGES=10` is a placeholder (section 14: the value of N). Session timer `SESSION_TTL_SECONDS=1800` (the brief's 30 minutes idle). Both in `app/config.py`, both must be > 0. Older messages are dropped for now, not summarized as the brief says: debt T12 (Phase 3) | Redis `LTRIM` counts list items. The bot sometimes sends 2 messages in a row (a transcript, then a question), so user + bot pairs don't always exist. A summary needs the LLM client (Step 2.4) |
+| 2026-10-31 | **Sliding expiry, one clear** (D4 A + smaller choice 5): every write (save the session, add a message) restarts the timer of **both** keys `session:{chat_id}` and `history:{chat_id}` in one `MULTI`/`EXEC` transaction. One `clear(chat_id)` deletes both keys in one command; used on submit, `/reset` and `/forget` | Brief: cleared "after 30 minutes idle" = 30 minutes after the *last* message, not the first; a fixed timer would delete a session in the middle of a slow conversation. The brief gives the history "the same" lifetime as the session, so no code path can keep one key and drop the other |
+| 2026-10-31 | Session model and store (smaller choices 1, 2, 4, 9): `step` = one of the 7 node names of section 4; a new session starts at `extract` (Step 2.10 may change the list). `missing_fields` is computed from the collected fields, in the asking order of design notes §1.9 (problem → unit → contact), never stored. A `SessionStore` class holds the Redis client, the TTL and N; in Phase 3 it reaches the handlers as `dp["session_store"]`. Inside, the store counts in milliseconds (`PX`, `PEXPIRE`); the setting is in seconds. The models hide field values and message text when printed (`repr=False`) and in validation errors (`hide_input_in_errors`) | One source of truth for "missing": the two can never disagree. Settings are read only in `main()` (2026-10-25). Tests can use a 200 ms timer. Section 9: a `logger.info(session)` or an error text must never show a name, phone or message |
+| 2026-10-31 | `Language` (`ar`, `en`) and `MessageRole` (`user`, `bot`) move from `app/db/models.py` into `app/schemas/labels.py`, like `Category` (smaller choice 3; Momo OK'd the `models.py` change, rule 10). Migration 1 does not change: it writes its lists out in full | One list for the database and the session store |
+| 2026-10-31 | **Redis timeouts** (smaller choice 7, Momo's values): connect 2 s, read 1 s. A timeout or a lost connection becomes one clear app error, which Phase 3 turns into a "please try again" reply | Reply target p95 < 5 s (section 11). Local Redis answers in about 1 ms, so 1 s is far above normal, and a message makes about 3 Redis calls: even 3 slow ones stay under 5 s. Momo allowed 1–2 s for reading; 1 s keeps that margin |
+| 2026-10-31 | **Broken session data** (smaller choice 6 + Momo's note): when the JSON in Redis fails validation (broken, or written by an older version of our code), the log gets only the chat ID and the error type, both keys are deleted, and `load()` tells the caller with its own error (not a silent "no session"). **Phase 3:** the bot then tells the user the conversation restarted (section 12, Phase 3) | No crash and no value in the log. A user whose answers vanish without a word would be confused. "No session" (first message, or 30 minutes idle) stays a normal `None` |
+| 2026-10-31 | Names (smaller choice 8, Momo's change): `app/memory/session_store.py` (class `SessionStore`) and `tests/test_session_store.py`, not `session.py` | `app/db/session.py` is SQLAlchemy's database session: one word, one meaning |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
 - Which F1 the brief's "≥ 0.85" means: macro (every class counts the same) or weighted (by class size). Ask the instructor; with 8 unbalanced classes the two can differ a lot.
 - Classifier v2: SetFit or multilingual BERT.
 - Final hosting: Oracle VM or Azure Container Apps free grant.
-- Value of N for conversation history, and the token budget per LLM call.
+- Value of N for conversation history, and the token budget per LLM call. (Step 2.3: placeholder `HISTORY_MAX_MESSAGES=10` messages, D3 A.)
 - How the bot knows a voice note's language: auto-detect (costs +35–45% time with `large-v3`) or a hint, e.g. the language of the user's last text (Phase 2, `stt.py`). Step 1.6's "language set" used the answer from `reference.csv`, which the bot won't have.
 - One Telegram bot for everything, or a separate dev bot and demo/prod bot (decide before Phase 5: webhook and polling can't share one bot). Never write the bot's username or IDs in this public repo.
 - License for the repo and our own data (registry, test set): ask the instructor (Step 1.10 D3 A: none yet).
@@ -653,6 +671,13 @@ Format:
 - Status: ✅ on `srbot`: `upgrade head` → `downgrade -1` → `upgrade head` (real output read), `alembic check` clean, also run from another folder (`prepend_sys_path = %(here)s`); seed twice: 4 + 188 new, then 0 + 0. pytest 249 passed with Postgres; CI simulation (a copy without `.env`): 186 passed + 63 skipped; ruff clean; `uv sync --locked` OK. 20 parallel SRs → 20 tickets. Privacy: a real refused row is hidden in our logs and in the Postgres log. Committed and pushed: PR #3, CI green on the first push. PR review (D4 A): 2 must-fix, both fixed in a follow-up commit (M1: asyncpg's wrong-type error shows the value itself → hidden in logs too; M2: this line).
 - Known issues / TODO: debt T11 (Phase 3: clean DB errors at the source). CI runs no database test until Step 2.11 (skipped, not failed). `alembic revision --autogenerate` also creates the empty `alembic_version` table (harmless). The view + `metabase_reader` → Step 2.12 (D7 A).
 - What Momo did: chose D1–D7 (with additions: no double `+asyncpg`, the `_test` guard, SAVEPOINT, the AnyIO note), double precision (B) and privacy A; read migration 1 line by line before it was applied; asked for the PR review and chose to fix M1 in PR #3.
+### Step 2.3 — Redis session store (2026-10-31)
+- Phase · role: Phase 2 · Backend & Memory. Branch `step-2.3-redis-session`.
+- Files: see section 5 "Exists since Step 2.3". Changed: `app/config.py` (+ `.env.example`, `tests/test_config.py`), `app/schemas/labels.py` + `app/db/models.py` (`Language`, `MessageRole`), `tests/conftest.py` + `tests/test_conftest.py` (Redis fixtures, guard), `tests/test_labels.py`, `pyproject.toml` + `uv.lock` (`redis`).
+- How it works: two Redis keys per chat: `session:{chat_id}` (one JSON text: fields, step, language, time) and `history:{chat_id}` (a list, the last 10 messages). Pydantic checks the data on the way in and out; printed forms and errors hide name, phone and texts. Every write restarts both 30-minute timers in one transaction; `clear()` deletes both.
+- Status: ✅ pytest 295 passed (28 new in `test_session_store.py`); CI simulation (copy without `.env`): 220 passed + 75 skipped (the 11 Redis tests skip); Redis "off": a clear error, not a hang (2 s); ruff clean. Live: sliding timer back to 1,800,000 ms after a write, a 200 ms key gone by itself, the `?db=0` trap refused by the guard, database 0 untouched by the tests. CHECK rules unchanged after the label move (text compared with migration 1). Committed (2 commits) and pushed: PR #4, CI green on the first push and on the PR (both runs).
+- Known issues / TODO: debts T12 (summaries), T13 (Redis snapshots on disk), T14 (lost update with two fast messages). Phase 3: "please try again" and "conversation restarted" replies (section 12). CI runs no Redis test until Step 2.11.
+- What Momo did: chose D1–D4 and the smaller choices, with changes (timeouts 2 s / 1 s, the `session_store` names, the Phase 3 note, debts T12–T14 in Momo's words); did the `redis-cli` exercise (TTL, sliding, LTRIM, a real session JSON); opened PR #4.
 
 ---
 
@@ -691,3 +716,6 @@ Each debt has a phase to pay it back. When it is paid, delete the row and say so
 | T9 | No `README.md` (a brief deliverable: "Git repository with README and setup instructions") | The public repo has no front page; CLAUDE.md is not a README | Phase 6 |
 | T10 | 311 rule `ELEVATOR` → `general, low`, but the test set labels "elevator broken" `medium` (Step 2.1 G3b: "something important doesn't work") | The classifier learns low from 311 and loses points on the test for it | Step 2.6, before training: rule → medium in `ml/label_mapping.py` + its test + the guide; re-run `prepare_311` |
 | T11 | A database error still carries the refused row (name, phone) in its exception chain, and a wrong-type error carries the value itself, even in `str(error)`. Only our log formatter (it hides `DETAIL:` lines and `query argument $N:` values) and Postgres's `terse` log setting stop it (Step 2.2, privacy A; PR #3 M1) | A crash outside logging (an uncaught exception printed to stderr), another log handler, or an error text sent to the user would show the row | Phase 3: the repository turns `IntegrityError` into a short app error with only the rule's name (`raise … from None` cuts the chain); uncaught exceptions go through logging |
+| T12 | The history drops messages older than the last `HISTORY_MAX_MESSAGES`; the brief says older turns are **summarized** (Step 2.3 D3 A) | In a long conversation the LLM no longer sees what was said early on. Smaller than it sounds: the collected fields are kept in the session, not only in the history | Phase 3, with the task "Keep the last N turns and summarize older ones" |
+| T13 | Redis snapshots (`dump.rdb`, on the `redisdata` volume) can keep deleted sessions (with name and phone) on disk for up to ~1 hour (checked live: `save 3600 1 300 100 60 10000`; Step 2.3) | Personal data stays on disk after `/reset`, `/forget`, submit or expiry, until the next snapshot replaces the file | Phase 5: decide whether the server's Redis keeps snapshots at all (likely `--save ""`, since sessions live 30 minutes), and how `/forget` fits with it |
+| T14 | Two fast messages from one chat can overwrite each other's session (**lost update**): aiogram handles updates at the same time, so both load the same session and the second save wins (Step 2.3) | One of the user's answers is lost without a word | Phase 3: process one chat's messages one at a time (per-chat lock). Note: an `asyncio.Lock` only works with one bot process; if Phase 5 runs more than one, use a Redis lock or optimistic locking with `WATCH` |

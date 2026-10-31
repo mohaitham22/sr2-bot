@@ -16,6 +16,8 @@ ENV_NAMES = [
     "STT_MODEL",
     "STT_MODEL_DIR",
     "VOICE_SAVE_USER_IDS",
+    "SESSION_TTL_SECONDS",
+    "HISTORY_MAX_MESSAGES",
 ]
 
 FAKE_SECRETS = {
@@ -37,7 +39,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_settings_load_without_env_file() -> None:
     settings = Settings(_env_file=None)  # _env_file=None: ignore the real .env
 
-    assert all(value is None for value in settings.model_dump().values())
+    values = settings.model_dump()
+    # Only the two session-memory settings have defaults (Step 2.3); all others are not set
+    assert values.pop("session_ttl_seconds") == 1800
+    assert values.pop("history_max_messages") == 10
+    assert all(value is None for value in values.values())
 
 
 def test_secrets_hidden_when_printed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,12 +60,13 @@ def test_secrets_hidden_when_printed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_empty_value_means_not_set(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("TELEGRAM_BOT_TOKEN=\nSTT_MODEL=\n", encoding="utf-8")
+    env_file.write_text("TELEGRAM_BOT_TOKEN=\nSTT_MODEL=\nSESSION_TTL_SECONDS=\n", encoding="utf-8")
 
     settings = Settings(_env_file=env_file)
 
     assert settings.telegram_bot_token is None
     assert settings.stt_model is None
+    assert settings.session_ttl_seconds == 1800  # empty = the default, as .env.example says
 
 
 def test_require_names_the_missing_variable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,4 +111,25 @@ def test_voice_user_ids_wrong_format_stops_at_startup(
     monkeypatch.setenv("VOICE_SAVE_USER_IDS", value)
 
     with pytest.raises(ValidationError, match="voice_save_user_ids"):
+        Settings(_env_file=None)
+
+
+def test_session_memory_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SESSION_TTL_SECONDS", "60")
+    monkeypatch.setenv("HISTORY_MAX_MESSAGES", "4")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.session_ttl_seconds == 60
+    assert settings.history_max_messages == 4
+
+
+@pytest.mark.parametrize("name", ["SESSION_TTL_SECONDS", "HISTORY_MAX_MESSAGES"])
+@pytest.mark.parametrize("value", ["0", "-5", "abc"])  # zero / negative / not a number
+def test_session_memory_settings_must_be_positive(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match=name.lower()):
         Settings(_env_file=None)
