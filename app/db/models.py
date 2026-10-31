@@ -34,12 +34,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeEngine
 
-from app.schemas.labels import CATEGORIES, SUBCATEGORIES, URGENCIES
+from app.schemas.labels import CATEGORIES, LANGUAGES, MESSAGE_ROLES, SUBCATEGORIES, URGENCIES
 
-# Allowed values of the other text columns (design notes 2.2). Labels: app/schemas/labels.py
-LANGUAGES = ("ar", "en")
+# Allowed values of the other text columns (design notes 2.2). Labels, languages and message
+# roles: app/schemas/labels.py (the session store uses them too, Step 2.3)
 SR_STATUSES = ("open", "in_progress", "closed")
-MESSAGE_ROLES = ("user", "bot")
 
 PERSONAL_DATA = "Personal data (CLAUDE.md section 9): never in logs, traces or git"
 

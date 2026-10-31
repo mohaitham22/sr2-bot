@@ -1,7 +1,13 @@
-"""Shared test setup (Step 2.2): the test database for the integration tests (D4 A).
+"""Shared test setup: the test databases for the integration tests.
 
-pytest reads this file by itself. A test that doesn't ask for `db`, `test_db_url` or
-`alembic_config` never touches a database.
+pytest reads this file by itself. A test that doesn't ask for `db`, `test_db_url`,
+`alembic_config`, `redis_db` or `test_redis_url` never touches a database.
+
+Redis (Step 2.3 D2 A): database 15 of the same Redis (the app uses 0), emptied (FLUSHDB) before
+and after each test. The guard refuses any other number. Skipped without REDIS_URL, failed with
+what to start when Redis is off: the same rules as Postgres below.
+
+Postgres (Step 2.2 D4 A):
 
 - Which database: DATABASE_URL from .env with "_test" added to the name (srbot -> srbot_test).
   Your dev database is never used: every helper refuses a name that doesn't end in "_test".
@@ -15,10 +21,13 @@ pytest reads this file by itself. A test that doesn't ask for `db`, `test_db_url
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
@@ -27,17 +36,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import ROOT_DIR, get_settings
 from app.db.models import Compound, Unit, User
 from app.db.session import database_url, make_engine
+from app.memory.session_store import make_redis
 
 TEST_SUFFIX = "_test"
+TEST_REDIS_DB = 15  # Redis has databases 0-15; the app uses 0 (the end of REDIS_URL)
 # Fake values for the test rows (all fictional)
 FAKE_NAME = "Test Resident"
 FAKE_PHONE = "+0000000000"  # E.164 shape, but no country has the code 0
 START_POSTGRES = "Start Rancher Desktop, then: docker compose up -d --wait postgres redis"
+START_REDIS = START_POSTGRES  # the same command starts both
 
 # A test scenario: an async function that gets a session. RunDb runs one (the `db` fixture).
 # Test files import these two names for their type hints.
 Scenario = Callable[[AsyncSession], Awaitable[None]]
 RunDb = Callable[[Scenario], None]
+# The same for Redis: a scenario gets a client on database 15 (the `redis_db` fixture)
+RedisScenario = Callable[[Redis], Awaitable[None]]
+RunRedis = Callable[[RedisScenario], None]
 
 
 def require_test_database(url: URL) -> URL:
@@ -120,6 +135,46 @@ async def add_test_user(session: AsyncSession, telegram_user_id: int = 1) -> Use
     return user
 
 
+def with_test_redis_db(url: str) -> str:
+    """The same Redis URL with database 15 at its end: redis://host:6379/0 -> .../15."""
+    return urlunsplit(urlsplit(url)._replace(path=f"/{TEST_REDIS_DB}"))
+
+
+def require_test_redis(client: Redis) -> Redis:
+    """The safety guard (D2 A): stop unless the client really uses database 15.
+
+    It reads the number the client will use, not the one we asked for: "?db=0" at the end of a
+    URL beats the "/15" path (checked in Step 2.3), and FLUSHDB empties a whole database.
+    """
+    number = client.connection_pool.connection_kwargs.get("db", 0)
+    if number != TEST_REDIS_DB:
+        raise RuntimeError(
+            f"Refusing to use Redis database {number} in tests: only database {TEST_REDIS_DB}, "
+            "so dev data can never be wiped"
+        )
+    return client
+
+
+async def ping_redis(url: str) -> None:
+    """Check once that the test Redis answers."""
+    client = require_test_redis(make_redis(url))
+    try:
+        await client.ping()
+    finally:
+        await client.aclose()
+
+
+async def run_on_test_redis(url: str, scenario: RedisScenario) -> None:
+    """Run one scenario on an empty database 15, and empty it again at the end."""
+    client = require_test_redis(make_redis(url))
+    try:
+        await client.flushdb()  # FLUSHDB: only this database (15), never the others
+        await scenario(client)
+    finally:
+        await client.flushdb()
+        await client.aclose()
+
+
 @pytest.fixture(scope="session")
 def test_db_url() -> URL:
     """The test database's URL. Created and migrated once per test run (scope="session")."""
@@ -159,5 +214,41 @@ def db(test_db_url: URL) -> RunDb:
 
     def run(scenario: Scenario) -> None:
         asyncio.run(run_in_rollback(test_db_url, scenario))
+
+    return run
+
+
+@pytest.fixture(scope="session")
+def test_redis_url() -> str:
+    """The test Redis URL (database 15). Checked once per test run (scope="session")."""
+    redis_url = get_settings().redis_url
+    if redis_url is None:
+        pytest.skip("REDIS_URL is not set: Redis tests skipped (CI until Step 2.11)")
+    url = with_test_redis_db(redis_url.get_secret_value())
+    try:
+        asyncio.run(ping_redis(url))
+    except (OSError, RedisError) as error:
+        # Only the error type, never the URL: on the server it will hold a password
+        pytest.fail(
+            f"Can't reach Redis for the session-store tests ({type(error).__name__}). "
+            f"{START_REDIS}",
+            pytrace=False,
+        )
+    return url
+
+
+@pytest.fixture
+def redis_db(test_redis_url: str) -> RunRedis:
+    """Run a test scenario with a client on an empty database 15; it is emptied again after.
+
+    Use:
+        def test_something(redis_db: RunRedis) -> None:
+            async def scenario(redis: Redis) -> None:
+                ...
+            redis_db(scenario)
+    """
+
+    def run(scenario: RedisScenario) -> None:
+        asyncio.run(run_on_test_redis(test_redis_url, scenario))
 
     return run
