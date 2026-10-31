@@ -114,9 +114,10 @@ app/
   services/          # stt.py, llm.py, extraction.py, classifier.py
   prompts/           # prompt files (*.md), versioned; never inline long prompts
   memory/            # Redis session store
-  db/                # SQLAlchemy models, session, repositories
-    seed/            # mock unit registry: generate_units.py + units.csv (committed; Step 1.9)
-  schemas/           # Pydantic models
+  db/                # models.py (7 tables), session.py (URL + engine), repositories.py (Step 2.2)
+    seed/            # mock unit registry: generate_units.py + units.csv (committed; Step 1.9),
+                     #   load_units.py (CSV -> Postgres; Step 2.2)
+  schemas/           # Pydantic models; labels.py = the allowed labels, one place (Step 2.2)
 ml/                  # data prep (sample_311.py, label_mapping.py, prepare_311.py), train_baseline.py, train_setfit.py
   data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample; processed/ holds 311_mapped.csv (Step 1.8)
   notebooks/         # EDA notebooks, saved with outputs (01_explore_311.ipynb)
@@ -126,7 +127,7 @@ eval/                # check_test_set.py, run_eval.py, ml_vs_llm.py, whisper_tes
                      #   reference.csv, results.csv, scores.csv, judgments.csv, review.md (Step 1.6)
   reports/           # whisper_phase1.md (Step 1.6)
 models/              # downloaded Whisper models, about 6.7 GB (git-ignored; STT_MODEL_DIR)
-migrations/          # Alembic
+migrations/          # Alembic: env.py, script.py.mako, README, versions/ (Step 2.2)
 docs/                # project_brief, data_card.md, labeling_guide.md, design_notes.md, model_report.md,
                      #   phase1_summary.md, progress_log.md
   prompts/           # step-by-step prompts for each phase (phase1.md, phase2.md, ...),
@@ -134,7 +135,9 @@ docs/                # project_brief, data_card.md, labeling_guide.md, design_no
 tests/
 .github/workflows/ci.yml   # exists since Step 1.3: ruff check, ruff format --check, pytest
 pyproject.toml  uv.lock  .python-version  .gitignore  .env.example   # exist since Step 1.1
-docker-compose.yml   # exists since Step 1.2: postgres + redis (app and metabase come later)
+alembic.ini          # Alembic settings, no database URL (Step 2.2)
+docker-compose.yml   # exists since Step 1.2: postgres + redis (app and metabase come later);
+                     #   Postgres logs errors terse, without DETAIL (Step 2.2)
 Dockerfile
 ```
 Exists since Step 1.1: `app/config.py`, `tests/test_config.py`, and empty `__init__.py` in `app/` (+ `bot/ graph/ services/ memory/ db/ schemas/`), `ml/`, `eval/`, `tests/`.
@@ -151,6 +154,7 @@ Exists since Step 1.11: `docs/design_notes.md` (the Phase 2 plan: §1 the 6 requ
 Exists since Step 1.12: `docs/phase1_summary.md` (one page for the instructor: what we built, decisions vs the brief, Whisper results, risks, questions), `docs/progress_log.md` (the step entries of finished phases, moved from section 15).
 Exists since Step 2.0: `docs/prompts/phase2.md` (Momo's step prompts for Phase 2, Steps 2.0–2.13).
 Exists since Step 2.1: `eval/check_test_set.py` (checks every test-set row against the guide, design notes §1 and the registry; prints coverage + SHA-256; exit code 1 on a problem), `tests/test_check_test_set.py` (a tiny fake CSV, so CI never needs the real file), `docs/prompts/test_set_extra_rows.md`. Git-ignored, on Momo's laptop only: `eval/test_set.csv` (252 rows), `eval/test_set_original.csv` (as Claude chat wrote it), `eval/test_set_extra.csv` (the 30 rows as sent), `eval/test_set_review.md` (the location before/after).
+Exists since Step 2.2: `app/schemas/labels.py` (labels, one place; `ml/label_mapping.py` imports them), `app/db/models.py`, `app/db/session.py`, `app/db/repositories.py` (ticket number), `app/db/seed/load_units.py`, `alembic.ini`, `migrations/` (`env.py`, `script.py.mako`, `README`, `versions/2026_10_31_1454-db87004e7de1_create_tables.py` = migration 1), `tests/conftest.py` (the test database `srbot_test`), `tests/test_conftest.py`, `tests/test_labels.py`, `tests/test_session.py`, `tests/test_models.py`, `tests/test_repositories.py`, `tests/test_load_units.py`, `tests/test_migrations.py`. `logging_setup.py` also hides Postgres `DETAIL:` lines and asyncpg's wrong-type values. The dev database `srbot` is at migration 1 with the registry loaded (4 compounds, 188 units).
 
 ---
 
@@ -164,7 +168,15 @@ docker compose exec postgres psql -U srbot -d srbot   # SQL shell (\q to quit)  
 docker compose exec redis redis-cli ping  # expect PONG                         ✅ works (Step 1.2)
 docker compose down                       # stop + delete containers; volumes (data) are KEPT   ✅ works (Step 1.2)
 # docker compose down -v                  # ALSO deletes the volumes = all data. Ask Momo first.
-uv run alembic upgrade head               # apply DB migrations
+uv run alembic upgrade head               # apply all DB migrations (to DATABASE_URL)   ✅ works (Step 2.2)
+uv run alembic downgrade -1               # undo the last migration (its tables AND their data are gone)   ✅ works (Step 2.2)
+uv run alembic current                    # which migration the database is at   ✅ works (Step 2.2)
+uv run alembic check                      # fail if models.py has a change that no migration has   ✅ works (Step 2.2)
+uv run alembic upgrade head --sql         # print the SQL only, change nothing   ✅ works (Step 2.2)
+uv run alembic revision --autogenerate -m "short title"   # write a new migration from models.py; read it before applying   ✅ works (Step 2.2)
+uv run python -m app.db.seed.load_units   # Step 2.2: units.csv -> compounds + units (safe to run twice)   ✅ works (Step 2.2)
+docker compose exec postgres psql -U srbot -d srbot_test   # the test database (pytest makes it; empty after the tests)   ✅ works (Step 2.2)
+docker compose up -d --wait postgres      # after a change in docker-compose.yml: new container, the data (volume) is kept   ✅ works (Step 2.2)
 uv run python -m app.bot.polling          # run the bot locally (no public URL needed); stop with Ctrl+C   ✅ works (Step 1.4)
 uv run uvicorn app.main:app --reload      # API for webhook mode
 uv run pytest                             # tests                         ✅ works (Step 1.1)
@@ -196,6 +208,7 @@ docker compose up -d metabase             # http://localhost:3000
 Note: Momo's terminal is Windows PowerShell 5.1, where `&&` does not work. Run the two ruff commands one after the other.
 Note: PowerShell 5.1 removes double quotes *inside* arguments passed to programs like `docker` (e.g. `sh -c '... "x" ...'`). Keep commands simple (as above), or use Git Bash for nested quotes.
 Note: Rancher Desktop must be running before any `docker` command.
+Note: pytest's database tests need Postgres running: they use `srbot_test`, never `srbot`. Without `DATABASE_URL` (CI until Step 2.11) they are skipped; with it but Postgres off, they fail with what to start.
 Note: only one copy of the bot can poll at a time; a second one gets a `Conflict` error from Telegram. The bot needs no Docker.
 Note: voice notes are saved to `eval/voice/raw/` only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, a JSON list like `[123456789]`; the brackets are required). Your ID = the `chat_id` in the bot's log for your private chat.
 Note: messages sent while the bot is off wait at Telegram (pending updates) and all arrive at once when it starts.
@@ -203,8 +216,9 @@ Note: Momo's terminal uses code page cp1252 and cannot print Arabic. Scripts wri
 
 ---
 
-## 7. Data model (Step 1.11)
+## 7. Data model (Step 1.11; built in Step 2.2)
 Summary only. Types, every CHECK rule, ON DELETE rules, indexes and the ER diagram: `docs/design_notes.md` §2.
+Code: `app/db/models.py`; tables made by Alembic migration 1 (`db87004e7de1`). Confidences are `double precision`.
 | Table | Columns |
 |---|---|
 | `compounds` | id, name_en (unique), name_ar (unique) |
@@ -354,7 +368,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 - [ ] Validate the output; re-ask once if the JSON is broken
 
 **Backend & Memory**
-- [ ] Build the SQLAlchemy models and Alembic migrations
+- [x] Build the SQLAlchemy models and Alembic migrations (Step 2.2: 7 tables, migration 1, the registry loaded, tests on `srbot_test`)
 - [ ] Build the Redis session store (`session:{chat_id}`, 30-minute expiry)
 - [ ] Define the LangGraph state
 
@@ -568,6 +582,16 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 | 2026-10-29 | **Test-set label review** (Step 2.1, Momo accepted all): 43 rows changed, no message text. G1 (27 rows, clear by the guide): gas smell → `gas`; electric water heater → `plumbing`; AC water on a socket → `electricity`; intercom and doorbell → `electricity, low`; toilet running → low; exhaust fan → `ac, medium`; AC smell → low; broken lock, elderly parent, rat → `medium` (D8 A). G2 (12, the guide's rule order): smoke from the AC → `electricity`; water near a light → `electricity`; the building door → `carpentry`; peeling paint → low; skirting board → `general`; basement water → `plumbing`. G3: scorpion stays high; elevator stays medium (debt T10); a dripping tap → low (T099, T204). T155 gets `arabic_digits`; T076 has no labels (D5 A). Labeling guide v1.2 makes 3 cases clear: smoke from the AC, scorpion or snake, dripping tap | 39 of 222 AI labels (18%) broke our guide: Claude chat never saw it. After the review, no row has `ac` + `high`: by the guide, the AC itself is never danger now, so the Step 2.6 data must not make that pair either |
 | 2026-10-29 | **30 extra test rows** (D1 A, author `ai`): Claude (chat) wrote T223–T252 from `docs/prompts/test_set_extra_rows.md` (our guide, registry and field rules; no test message): 15 `gas` (8 high, 5 medium, 2 low) + 15 `appliances` (9 medium, 6 low, 0 high). Momo accepted the numbers and the first `gas, low` example (a stiff valve or a broken meter cover, no smell), now in guide v1.2 | Gas had 3 rows and appliances 0. With the rules in the prompt, all 30 passed the checker and the label review the first time (the first 222 needed 39 label and 167 location fixes). No `appliances` + `high`: danger from a device is `electricity` or `plumbing` by the guide |
 | 2026-10-29 | **Test set frozen (v1):** `eval/test_set.csv`, **252 rows**, SHA-256 **`786e72ad2179f88b3d1c9418dd84038154bfae39c4da18c819db9d18754ecbcc`** (computed by `uv run python -m eval.check_test_set`, line ends read as LF); checker 0 problems; labeling guide v1.2. Last look: 20 random rows (seed 2026) all agree with the guide; T082 (a door handle came off) stays `medium`. **From now on no change** without a new entry here: fix the row with the guide (and check its similar rows, not only the model's errors), run the checker, record "Test set changed (v2)" with the id, old → new label, reason, row count and new hash, then re-run every score on v2 | The test set is the ruler for every model (baseline, v2, LLM zero-shot): if it changes between measurements, a better score may come from an easier test. Changing it after seeing results is tuning on the test. Fixing only the rows the model got wrong moves the score in one direction. The hash proves which version a score used; never mix v1 and v2 scores in one table |
+| 2026-10-31 | New main dependencies (Step 2.2 D1): `sqlalchemy[asyncio]>=2.1.6,<2.2` (MIT; the extra adds `greenlet`, which async needs), `asyncpg>=0.32.0` (Apache-2.0), `alembic>=1.20.1,<2` (MIT) | The app needs them at run time; Phase 5 runs migrations on deploy. A SQLAlchemy minor version can change behavior, so `<2.2`. `uv.lock` pins the exact versions |
+| 2026-10-31 | `DATABASE_URL` stays `postgresql://…` in `.env`. One helper in `app/db/session.py` adds the driver `+asyncpg`; the app and Alembic's `env.py` both use it. A URL that already has `+asyncpg` is kept as it is (tested) (D2 A) | One place for the rule; no `.env` edit; the same plain URL works for other tools and for the CI service in Step 2.11 |
+| 2026-10-31 | **Labels in one place:** `app/schemas/labels.py` (8 categories, 3 urgencies, the `ac` subcategories); `ml/label_mapping.py` imports them (D3 A; Momo OK'd the ml change, rule 10). Labels are `text` + CHECK (Step 1.11). A label change later = `labels.py` + a hand-written migration (UPDATE the old rows, drop the old CHECK, add the new one). A migration writes its label list literally and never imports `labels.py` | One list for the database, the classifier and the extraction schema (Steps 2.7–2.8); the app no longer depends on training code. Alembic's autogenerate does not see CHECK changes. A migration is history: it must always build what existed at its time |
+| 2026-10-31 | **Test database** (D4 A): `<POSTGRES_DB>_test` (e.g. `srbot_test`) in the same container, created and migrated by the tests; each test runs in a transaction that is rolled back at the end. Guard: the fixtures refuse any database whose name doesn't end in `_test`. An insert that must fail runs inside a SAVEPOINT (`begin_nested`). DB tests are skipped when `DATABASE_URL` is not set (CI until Step 2.11) and fail with a clear message when Postgres is off | Tests can never touch Momo's dev data, even with a wrong URL. In Postgres one error aborts the whole transaction; the savepoint undoes only the failed insert, so the test can go on and the final rollback still cleans up. A silent skip on the laptop would hide a stopped Docker |
+| 2026-10-31 | Async tests keep `asyncio.run()` (D5 A; confirms the 2026-10-25 D2 A). **Revisit in Phase 3:** FastAPI depends on AnyIO (through Starlette), and AnyIO has its own pytest plugin, so async fixtures may need no new dependency then | No new dependency for a few DB tests |
+| 2026-10-31 | **Indexes** (D6 A): only the 4 of design notes §2.8: `service_requests (created_at)`, `(user_id)`, `(unit_id)` and `messages (telegram_chat_id)`; none on `category` or `status`. Foreign keys with no index at all: `user_units.unit_id` and `messages.sr_id`. More indexes only if `EXPLAIN` shows a need in Phase 4, in a new migration | An index costs time on every insert; columns with few values (low cardinality) rarely use one; with a few hundred rows a full read takes under 1 ms. A missing FK index only slows the delete of a parent row, and registry units and SRs are never deleted |
+| 2026-10-31 | `predictions.category_confidence` and `urgency_confidence` are `double precision`, not `real` (Step 2.2, Momo: B). Design notes v2 updated, with the other small changes `models.py` made (ticket pattern CHECK, 2 `closed_at` CHECKs, `confirmed_at` default now, `ON DELETE RESTRICT` written out, unit regex) | 8 bytes like Python's `float`, so a value comes back exactly as saved; as `real` (4 bytes) 0.87 came back as 0.8700000047683716. The size difference doesn't matter at our scale |
+| 2026-10-31 | **Database errors and personal data** (Step 2.2, privacy A). Found with fake data on `srbot_test`: when a rule refuses a row, Postgres sends the whole row back as `DETAIL: Failing row contains (…, name, phone, …)`. `hide_parameters` doesn't hide it (it is in asyncpg's error, the *cause* in the chain, which every traceback prints), and the Postgres server log had it too. Fixed now: `RedactingFormatter` replaces every `DETAIL:` line in every log line, tracebacks included; Postgres runs with `log_error_verbosity=terse` (`docker-compose.yml`). Tested with a real refused insert. PR #3 review (M1) found a second path: for a value of the wrong type, asyncpg writes the value itself into its error (`invalid input for query argument $1: '<value>'`), even in `str(error)`; the formatter now hides everything after `query argument $N:` too, tested with a real wrong-type insert. The rest is debt T11 (Phase 3) | Section 9: name and phone never in logs or error messages. Cost: debugging a refused row shows the rule's name, not the row |
+| 2026-10-31 | The view `dashboard_service_requests` and the user `metabase_reader` come in Step 2.12, not in migration 1 (D7 A). The password is read from `.env` at run time and is never written in a migration file. Step 2.12 explains whether a database user (server-wide, not part of one database) belongs in a migration or in a setup script | Step 2.12 owns Metabase and its `.env` values. Migration files are committed to the public repo |
+| 2026-10-31 | Smaller Step 2.2 choices: `alembic.ini` has no database URL (`env.py` reads it through `session.py`); migration file names start with the date; a ruff hook formats every new migration, and `script.py.mako` uses modern type hints; `load_units.py` only inserts missing rows (`ON CONFLICT DO NOTHING`), never updates or deletes, and stops with nothing saved when the database differs from the CSV; the test helpers (`run_in_rollback`, fake rows) live in `tests/conftest.py`; no `relationship()` in the models yet; `created_at` comes from the database (`now()`), never from Python | The URL holds the password, and `alembic.ini` is committed. Files sort in the order they were made; a new migration passes CI as written. A unit may already have SRs, so the seed never changes one; a person decides about a difference. Async lazy loading fails (`MissingGreenlet`), so joins are written where they are needed (Phase 3). One clock (the database's) for every time |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -622,6 +646,14 @@ Format:
 - Status: ✅ checker 0 problems on 252 rows; pytest 154 passed; ruff clean; realism review: 30 random rows, 0 marked; Anthropic terms read. ✅ **Frozen as v1** (freeze prompt, same day): 20 random rows re-read, none changed; row count + SHA-256 in section 13. ⏸️ Not committed yet.
 - Known issues / TODO: ⚠️ AI-written test set differs from the brief (instructor approval pending). Debt T10 (311 elevator rule) before training. The counts in `phase2.md` ("plumbing 45, …") are from before the review (Momo's file: suggestion only). Momo backs up `eval/test_set.csv` (not in git).
 - What Momo did: chose D1–D6; accepted the label review (G1–G4); read the location review and 30 random rows; ran the extra-rows prompt in Claude chat and saved the 30 rows.
+### Step 2.2 — Database models and migrations (2026-10-31)
+- Phase · role: Phase 2 · Backend & Memory. Branch `step-2.2-db-models`.
+- Files: see section 5 "Exists since Step 2.2". Changed: `ml/label_mapping.py` (imports the labels), `app/logging_setup.py` (hides `DETAIL:`), `docker-compose.yml` (terse log), `pyproject.toml` + `uv.lock` (3 dependencies), design notes v2, data card v1.3, `.env.example`.
+- How it works: `models.py` describes the 7 tables of design notes §2; Alembic migration 1 builds them (18 CHECKs, 7 FKs, 6 UNIQUE, 4 indexes, personal-data comments). The ticket = the sequence's next `id` + the Cairo date, so two SRs saved at the same moment can't share one. `load_units.py` loads the registry, safe to run twice. Tests run on `srbot_test`, each one rolled back.
+- Status: ✅ on `srbot`: `upgrade head` → `downgrade -1` → `upgrade head` (real output read), `alembic check` clean, also run from another folder (`prepend_sys_path = %(here)s`); seed twice: 4 + 188 new, then 0 + 0. pytest 249 passed with Postgres; CI simulation (a copy without `.env`): 186 passed + 63 skipped; ruff clean; `uv sync --locked` OK. 20 parallel SRs → 20 tickets. Privacy: a real refused row is hidden in our logs and in the Postgres log. Committed and pushed: PR #3, CI green on the first push. PR review (D4 A): 2 must-fix, both fixed in a follow-up commit (M1: asyncpg's wrong-type error shows the value itself → hidden in logs too; M2: this line).
+- Known issues / TODO: debt T11 (Phase 3: clean DB errors at the source). CI runs no database test until Step 2.11 (skipped, not failed). `alembic revision --autogenerate` also creates the empty `alembic_version` table (harmless). The view + `metabase_reader` → Step 2.12 (D7 A).
+- What Momo did: chose D1–D7 (with additions: no double `+asyncpg`, the `_test` guard, SAVEPOINT, the AnyIO note), double precision (B) and privacy A; read migration 1 line by line before it was applied; asked for the PR review and chose to fix M1 in PR #3.
+
 ---
 
 ## 16. Stretch list (ideas not in the brief)
@@ -658,3 +690,4 @@ Each debt has a phase to pay it back. When it is paid, delete the row and say so
 | T8 | `av<19` (for faster-whisper 1.2.1); aiogram caps pydantic `<2.14` | We miss fixes in newer versions | When the upstream packages support them |
 | T9 | No `README.md` (a brief deliverable: "Git repository with README and setup instructions") | The public repo has no front page; CLAUDE.md is not a README | Phase 6 |
 | T10 | 311 rule `ELEVATOR` → `general, low`, but the test set labels "elevator broken" `medium` (Step 2.1 G3b: "something important doesn't work") | The classifier learns low from 311 and loses points on the test for it | Step 2.6, before training: rule → medium in `ml/label_mapping.py` + its test + the guide; re-run `prepare_311` |
+| T11 | A database error still carries the refused row (name, phone) in its exception chain, and a wrong-type error carries the value itself, even in `str(error)`. Only our log formatter (it hides `DETAIL:` lines and `query argument $N:` values) and Postgres's `terse` log setting stop it (Step 2.2, privacy A; PR #3 M1) | A crash outside logging (an uncaught exception printed to stderr), another log handler, or an error text sent to the user would show the row | Phase 3: the repository turns `IntegrityError` into a short app error with only the rule's name (`raise … from None` cuts the chain); uncaught exceptions go through logging |

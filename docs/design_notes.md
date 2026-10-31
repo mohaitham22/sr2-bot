@@ -1,6 +1,6 @@
 # Design notes
 
-**Version 1 · 2026-10-28 · Step 1.11**
+**Version 2 · 2026-10-31 · Step 2.2**
 
 This file is the plan for Phase 2, written before the code. It says what the bot collects (part 1),
 how the database stores it (part 2), and what the dashboard needs from it (part 3).
@@ -282,10 +282,10 @@ erDiagram
         text model_name
         text model_version
         text category
-        real category_confidence
+        double category_confidence
         text subcategory
         text urgency
-        real urgency_confidence
+        double urgency_confidence
         boolean needs_review
         timestamptz created_at
     }
@@ -322,7 +322,7 @@ database itself (constraints), so wrong data can't get in even if the Python cod
 | `id` | integer | PK | |
 | `compound_id` | integer | NOT NULL, FK → `compounds.id` | which compound |
 | `building` | text | NOT NULL, CHECK: one letter `A`–`F` | `B` |
-| `unit_number` | text | NOT NULL, CHECK: pattern `A-201` and first letter = `building` | `B-201` |
+| `unit_number` | text | NOT NULL, CHECK: pattern `^[A-F]-[0-9]{3}$` and first letter = `building` | `B-201` |
 
 UNIQUE (`compound_id`, `unit_number`). `unit_number` alone is not unique: B-204 exists in two
 compounds. Section 7 said unique(compound, building, unit_number); because the CHECK ties the
@@ -351,7 +351,7 @@ they come from `user_units` and from `service_requests.user_id` (section 2.5).
 |---|---|---|---|
 | `user_id` | integer | PK (part 1), FK → `users.id`, ON DELETE CASCADE | |
 | `unit_id` | integer | PK (part 2), FK → `units.id` | |
-| `confirmed_at` | timestamptz | NOT NULL | when the user said "yes" to this unit |
+| `confirmed_at` | timestamptz | NOT NULL, default now | when the user said "yes" to this unit |
 
 The primary key is the pair (`user_id`, `unit_id`): a composite key. The same link can't be saved twice.
 
@@ -360,7 +360,7 @@ The primary key is the pair (`user_id`, `unit_id`): a composite key. The same li
 | Column | Type | Rule | Meaning |
 |---|---|---|---|
 | `id` | integer | PK, identity **BY DEFAULT** (section 2.6) | also the number inside the ticket |
-| `ticket_no` | text | NOT NULL, UNIQUE | `SR-20261028-0042` (D5 B, section 2.6) |
+| `ticket_no` | text | NOT NULL, UNIQUE, CHECK: pattern `^SR-[0-9]{8}-[0-9]{4,}$` | `SR-20261028-0042` (D5 B, section 2.6) |
 | `user_id` | integer | FK → `users.id`, NULL allowed, ON DELETE SET NULL | empty after `/forget` (D8 C) |
 | `unit_id` | integer | NOT NULL, FK → `units.id` | always a real unit (D3 A) |
 | `description` | text | NOT NULL | the problem, user's language; `[deleted]` after `/forget` |
@@ -370,7 +370,7 @@ The primary key is the pair (`user_id`, `unit_id`): a composite key. The same li
 | `urgency` | text | NOT NULL, CHECK: `low`, `medium`, `high` | final urgency |
 | `status` | text | NOT NULL, default `open`, CHECK: `open`, `in_progress`, `closed` | |
 | `created_at` | timestamptz | NOT NULL, default now | when the user confirmed |
-| `closed_at` | timestamptz | NULL until closed; CHECK: set only when `status` = `closed`, and ≥ `created_at` | for the handling time |
+| `closed_at` | timestamptz | NULL until closed; 2 CHECKs: set exactly when `status` = `closed` (`closed_at_if_closed`), and ≥ `created_at` (`closed_after_created`) | for the handling time |
 
 **`predictions`**: every model answer for an SR (D7 A). One row per SR per model run.
 
@@ -381,10 +381,10 @@ The primary key is the pair (`user_id`, `unit_id`): a composite key. The same li
 | `model_name` | text | NOT NULL | e.g. `tfidf_logreg` |
 | `model_version` | text | NOT NULL | e.g. `1.0.0` |
 | `category` | text | NOT NULL, CHECK: the 8 categories | |
-| `category_confidence` | real | NOT NULL, CHECK: 0–1 | |
+| `category_confidence` | double precision | NOT NULL, CHECK: 0–1 | |
 | `subcategory` | text | NULL allowed (same CHECK as above) | |
 | `urgency` | text | NOT NULL, CHECK: 3 levels | |
-| `urgency_confidence` | real | NOT NULL, CHECK: 0–1 | |
+| `urgency_confidence` | double precision | NOT NULL, CHECK: 0–1 | |
 | `needs_review` | boolean | NOT NULL | true if either confidence is below the threshold (set in Phase 4) |
 | `created_at` | timestamptz | NOT NULL, default now | |
 
@@ -463,9 +463,11 @@ Format: `SR-YYYYMMDD-NNNN`, e.g. `SR-20261028-0042`.
   time again since 2023, so never a fixed "+2").
 - `NNNN` = the SR's `id`, with zeros in front up to 4 digits. It does not restart each day;
   after 9999 it simply gets longer (`SR-20271231-10342`).
-- Made in one statement: take the next `id` from the database sequence, build the ticket,
-  insert the row with that `id`. Two SRs saved at the same moment get different `id`s, so they
-  can't get the same ticket (no race condition).
+- Made in one transaction (`app/db/repositories.py`, Step 2.2): one query takes the next `id`
+  from the database sequence and the Cairo date of `now()`; Python builds the ticket; the row is
+  inserted with that `id`. `now()` is the start time of the transaction, so `created_at` gets the
+  same moment. Two SRs saved at the same moment get different `id`s, so they can't get the same
+  ticket (no race condition; tested with 20 SRs at once).
 - So `service_requests.id` is an identity column **BY DEFAULT**: the app may supply the `id` it
   took. With `GENERATED ALWAYS` (the other tables), Postgres refuses a supplied `id` (tested in C1).
 - Pad the number in Python: `f"{id:04d}"` gives `0042` and leaves `10342` whole. In SQL, plain
@@ -499,7 +501,7 @@ Known limit: in a real compound a unit identifies a household; here the units ar
 
 | FK | When the parent row is deleted | Why |
 |---|---|---|
-| `units.compound_id` | refused (RESTRICT, the default) | a compound with units is never deleted |
+| `units.compound_id` | refused (RESTRICT) | a compound with units is never deleted |
 | `user_units.user_id` | CASCADE (delete the link) | `/forget` |
 | `user_units.unit_id` | refused | registry units are not deleted |
 | `service_requests.user_id` | SET NULL | `/forget` keeps the SR (D8 C) |
@@ -508,6 +510,8 @@ Known limit: in a real compound a unit identifies a household; here the units ar
 | `messages.sr_id` | CASCADE | same |
 
 SRs themselves are never deleted by the bot; CASCADE matters only for manual clean-ups and tests.
+"Refused" is written out as `ON DELETE RESTRICT` (Step 2.2). Postgres's real default is
+`NO ACTION`: it refuses too, but checks at the end of the statement instead of at once.
 
 ### 2.8 Types and conventions
 
@@ -516,6 +520,9 @@ SRs themselves are never deleted by the bot; CASCADE matters only for manual cle
   CHECK in a migration. Changing an ENUM is harder.
 - **Telegram IDs are `bigint`:** they can be bigger than an `integer` holds (about 2.1 billion).
 - **Phone and unit numbers are `text`:** they have `+`, letters and leading zeros.
+- **Confidences are `double precision`** (8 bytes), not `real` (4 bytes) (Step 2.2): Python's
+  `float` is 8 bytes too, so a value comes back exactly as it was saved. As `real`, 0.87 came
+  back as 0.8700000047683716.
 - **Indexes:** Postgres makes an index for each PK and UNIQUE rule by itself, but **not** for FKs.
   Add: `service_requests (created_at)` (charts by date), `service_requests (user_id)`
   (`/status`, `/forget`), `service_requests (unit_id)`, `messages (telegram_chat_id)` (`/forget`).
@@ -721,3 +728,4 @@ the SRs saved before it.
 | Version | Date | Change |
 |---|---|---|
 | 1 | 2026-10-28 | First version, Step 1.11: required fields (D1–D4), database sketch (D5–D8), dashboard plan (D9–D10). Check C1 in the local Postgres 16.15, inside one transaction that ended with ROLLBACK (nothing kept): the 7 tables + view + role created; all 188 registry units loaded; 20 bad inserts all refused; the 5 chart queries run as `metabase_reader` gave the answers worked out by hand; `users`, `messages`, `service_requests` denied to it; `/forget` in the order of 2.7 left 6 SRs on the dashboard. C1 found 4 changes, made here: identity BY DEFAULT for `service_requests.id`, the `lpad` trap, numbers can skip, no `predictions (sr_id)` index; plus the phone CHECK. |
+| 2 | 2026-10-31 | Step 2.2, to match `app/db/models.py`: confidences `real` → `double precision`; new CHECK on the `ticket_no` pattern; the `closed_at` rule as 2 named CHECKs; `user_units.confirmed_at` default now; `ON DELETE RESTRICT` written out (the default is `NO ACTION`); the unit pattern written as a regex. §2.6: the ticket is made in one transaction (one query + the INSERT), not "one statement". |

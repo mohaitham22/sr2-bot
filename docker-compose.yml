@@ -7,6 +7,10 @@ services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    # terse: the server log keeps each error and the rule's name, but not DETAIL, HINT or
+    # CONTEXT. A refused row's DETAIL contains the whole row (name, phone): personal data must
+    # never be in a log (CLAUDE.md section 9; Step 2.2, privacy A)
+    command: ["postgres", "-c", "log_error_verbosity=terse"]
     environment:
       # ":?" stops compose with this message if the value is missing in .env (fail fast).
       # Only used the first time, when the pgdata volume is empty.
