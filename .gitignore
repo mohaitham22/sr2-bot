@@ -41,6 +41,9 @@ eval/voice/
 # The checker (eval/check_test_set.py) is committed; its name doesn't match this pattern
 eval/test_set*
 
+# --- LLM usage numbers (Step 2.4 D5 B): no text, but they show when and how the bot was used ---
+eval/llm_usage/
+
 # --- Internal documents (repo is public) ---
 docs/project_brief.pdf
 
