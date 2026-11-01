@@ -2,12 +2,16 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import PositiveInt, SecretStr, field_validator
+from pydantic import PositiveFloat, PositiveInt, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Project root (the folder that holds pyproject.toml), so .env is found from any working directory
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# The LLM providers app/services/llm.py can use (Step 2.4). Azure OpenAI comes later (stretch S12)
+LLMProvider = Literal["groq", "gemini"]
 
 
 class Settings(BaseSettings):
@@ -45,13 +49,35 @@ class Settings(BaseSettings):
     # 10 is a placeholder until the token budget is set (section 14). Older ones: debt T12.
     history_max_messages: PositiveInt = 10
 
-    @field_validator("stt_model_dir")
+    # LLM client (Step 2.4). Switching provider = LLM_PROVIDER + LLM_MODEL; the key is the
+    # provider's own *_API_KEY above. LLM_BASE_URL only replaces the provider's usual address.
+    llm_provider: LLMProvider = "groq"
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    # Per try vs all tries together, waits included (Momo's change 1): a user never waits longer
+    # than the total. PositiveFloat: a number > 0, so "0" or "abc" stops the app at startup.
+    llm_timeout_seconds: PositiveFloat = 10.0
+    llm_total_timeout_seconds: PositiveFloat = 20.0
+    # One JSON line per LLM call, numbers only, for Phase 4 (D5 B). Not set: no file is written.
+    llm_usage_file: Path | None = None
+
+    @field_validator("stt_model_dir", "llm_usage_file")
     @classmethod
     def _start_at_root(cls, value: Path | None) -> Path | None:
         """Make a relative path start at the project root, so it is the same folder everywhere."""
         if value is None or value.is_absolute():
             return value
         return ROOT_DIR / value
+
+    @model_validator(mode="after")
+    def _total_covers_one_try(self) -> Self:
+        """The total time must allow at least one whole try, or the per-try value means nothing."""
+        if self.llm_total_timeout_seconds < self.llm_timeout_seconds:
+            raise ValueError(
+                "LLM_TOTAL_TIMEOUT_SECONDS must be at least LLM_TIMEOUT_SECONDS "
+                f"({self.llm_total_timeout_seconds} < {self.llm_timeout_seconds})"
+            )
+        return self
 
     def require(self, *names: str) -> None:
         """Fail fast: stop if any of the named settings is not set.

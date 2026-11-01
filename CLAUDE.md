@@ -57,7 +57,7 @@ Start every answer with 2–3 sentences in very simple English saying what we ar
 | Bot | aiogram 3 | Polling locally, webhook when deployed |
 | API | FastAPI + Uvicorn | Receives the Telegram webhook |
 | Conversation flow | LangGraph | Open-source library only; no paid LangSmith |
-| LLM | Groq free tier (default), Gemini Flash free tier (backup) | All calls go through `app/services/llm.py`; provider and model are set by env vars |
+| LLM | Groq free tier (default), Gemini Flash free tier (backup) | All calls go through `app/services/llm.py` (the `openai` package on each provider's OpenAI-compatible endpoint, Step 2.4); provider and model are set by env vars. Azure OpenAI later (S12) |
 | Speech-to-text | Self-hosted Whisper with `faster-whisper`, on CPU first | Reads Telegram `.ogg` directly (no ffmpeg install). Model `large-v3`, int8, CPU (Step 1.6 D10 A; `medium` is the backup). Groq Whisper API only as a comparison in Step 1.6, never in the app |
 | Validation | Pydantic v2 | Every LLM output is validated against a schema |
 | Classifier | scikit-learn TF-IDF + LogisticRegression (v1) → SetFit or multilingual BERT (v2) | Train v2 on Colab/Kaggle free GPU |
@@ -111,7 +111,8 @@ app/
   logging_setup.py   # log format for all entry points; hides secrets (token) in every line
   bot/               # aiogram handlers, middlewares, polling entry point
   graph/             # LangGraph state, nodes, edges
-  services/          # stt.py, llm.py, extraction.py, classifier.py
+  services/          # llm.py (the one LLM client) + retry.py (backoff, jitter, deadline) (Step 2.4),
+                     #   stt.py, extraction.py, classifier.py
   prompts/           # prompt files (*.md), versioned; never inline long prompts
   memory/            # session_store.py: the Redis session + history (Step 2.3; not "session.py":
                      #   app/db/session.py is SQLAlchemy's database session)
@@ -122,8 +123,9 @@ app/
 ml/                  # data prep (sample_311.py, label_mapping.py, prepare_311.py), train_baseline.py, train_setfit.py
   data/raw/ data/processed/   # git-ignored; raw/ holds Momo's 311 export + the Step 1.7 sample; processed/ holds 311_mapped.csv (Step 1.8)
   notebooks/         # EDA notebooks, saved with outputs (01_explore_311.ipynb)
-eval/                # check_test_set.py, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py
-                     #   test_set*.csv / .md: git-ignored (Step 2.1 D6 A)
+eval/                # check_test_set.py, run_eval.py, ml_vs_llm.py, whisper_test.py, score_whisper.py,
+                     #   llm_smoke_test.py (Step 2.4); test_set*.csv / .md: git-ignored (Step 2.1 D6 A)
+  llm_usage/         # git-ignored: usage.jsonl, one line of numbers per LLM call (Step 2.4 D5 B)
   voice/             # git-ignored, the whole folder: raw/ (test voice notes saved by the bot),
                      #   reference.csv, results.csv, scores.csv, judgments.csv, review.md (Step 1.6)
   reports/           # whisper_phase1.md (Step 1.6)
@@ -157,6 +159,7 @@ Exists since Step 2.0: `docs/prompts/phase2.md` (Momo's step prompts for Phase 2
 Exists since Step 2.1: `eval/check_test_set.py` (checks every test-set row against the guide, design notes §1 and the registry; prints coverage + SHA-256; exit code 1 on a problem), `tests/test_check_test_set.py` (a tiny fake CSV, so CI never needs the real file), `docs/prompts/test_set_extra_rows.md`. Git-ignored, on Momo's laptop only: `eval/test_set.csv` (252 rows), `eval/test_set_original.csv` (as Claude chat wrote it), `eval/test_set_extra.csv` (the 30 rows as sent), `eval/test_set_review.md` (the location before/after).
 Exists since Step 2.2: `app/schemas/labels.py` (labels, one place; `ml/label_mapping.py` imports them), `app/db/models.py`, `app/db/session.py`, `app/db/repositories.py` (ticket number), `app/db/seed/load_units.py`, `alembic.ini`, `migrations/` (`env.py`, `script.py.mako`, `README`, `versions/2026_10_31_1454-db87004e7de1_create_tables.py` = migration 1), `tests/conftest.py` (the test database `srbot_test`), `tests/test_conftest.py`, `tests/test_labels.py`, `tests/test_session.py`, `tests/test_models.py`, `tests/test_repositories.py`, `tests/test_load_units.py`, `tests/test_migrations.py`. `logging_setup.py` also hides Postgres `DETAIL:` lines and asyncpg's wrong-type values. The dev database `srbot` is at migration 1 with the registry loaded (4 compounds, 188 units).
 Exists since Step 2.3: `app/memory/session_store.py` (the models `Session`, `CollectedFields`, `HistoryMessage`; `make_redis()`; the class `SessionStore` with `load`, `save`, `add_message`, `get_history`, `clear`; the errors `SessionStoreUnavailable`, `SessionDataLost`), `tests/test_session_store.py`. `tests/conftest.py` also has the Redis fixtures (`redis_db`, `test_redis_url`: database 15 + the guard). `config.py` has `session_ttl_seconds` and `history_max_messages`; `labels.py` has `Language` and `MessageRole` (moved from `models.py`). New dependency: `redis`.
+Exists since Step 2.4: `app/services/retry.py` (`RetryPolicy`, `retry_async`, `RetryGaveUp`: generic, knows nothing about LLMs), `app/services/llm.py` (`LLMClient` with `complete`, `complete_json`, `list_models`; `make_llm_client()`; `ChatMessage`, `LLMUsage`, `LLMText`, `LLMJson`; the errors `LLMUnavailable`, `LLMRequestRefused`, `LLMOutputInvalid`; `strict_json_schema()`, `safe_code()`), `eval/llm_smoke_test.py` (manual, real calls; never in CI), `tests/test_retry.py`, `tests/test_llm.py`. `config.py` has `llm_provider`, `llm_model`, `llm_base_url`, `llm_timeout_seconds`, `llm_total_timeout_seconds`, `llm_usage_file` (type `LLMProvider`). New dependency: `openai` (+ `jiter`). Git-ignored output: `eval/llm_usage/usage.jsonl`.
 
 ---
 
@@ -201,6 +204,10 @@ uv run python -m eval.run_eval
 uv run python -m eval.whisper_test        # Step 1.6 Whisper test: local models, then Groq → eval/voice/results.csv (resumes)   ✅ works (Step 1.6)
 uv run python -m eval.whisper_test --engine local --models small   # one engine / model only   ✅ works (Step 1.6)
 uv run python -m eval.score_whisper       # score results.csv → scores.csv, review.md + summary table   ✅ works (Step 1.6)
+uv run python -m eval.llm_smoke_test      # Step 2.4: ONE real LLM call (harmless sentence, strict JSON) with the provider + model in .env; prints the answer + numbers   ✅ works (Step 2.4)
+uv run python -m eval.llm_smoke_test --text   # the same, plain text (no schema)   ✅ works (Step 2.4)
+uv run python -m eval.llm_smoke_test --provider gemini --model gemini-2.5-flash   # another provider/model for one run; .env unchanged   ✅ works (Step 2.4)
+uv run python -m eval.llm_smoke_test --provider gemini --list-models   # model names the key may use (no tokens)   ✅ works (Step 2.4)
 uv run python -m eval.check_test_set      # Step 2.1: check eval/test_set.csv → problems, coverage, SHA-256 (exit 1 on a problem)   ✅ works (Step 2.1)
 uv run python -m eval.check_test_set --path eval/test_set_original.csv   # check another file   ✅ works (Step 2.1)
 uv run python -m ml.sample_311            # Step 1.7: read the 16 GB 311 export → HPD sample + full counts in ml/data/raw/ (about 3 min)   ✅ works (Step 1.7)
@@ -214,6 +221,7 @@ Note: PowerShell 5.1 removes double quotes *inside* arguments passed to programs
 Note: Rancher Desktop must be running before any `docker` command.
 Note: pytest's database tests need Postgres running: they use `srbot_test`, never `srbot`. Without `DATABASE_URL` (CI until Step 2.11) they are skipped; with it but Postgres off, they fail with what to start.
 Note: pytest's Redis tests work the same way: database 15, never 0 (the app's), emptied before and after each test; skipped without `REDIS_URL`; an error with what to start when Redis is off.
+Note: pytest never calls a real LLM (a fake server answers, CI needs no key). `eval/llm_smoke_test.py` makes ONE real call and uses free quota: our own harmless sentence only, never real resident text (section 9). Its numbers go to `eval/llm_usage/usage.jsonl` like every call.
 Note: in `redis-cli`, never run `MONITOR` or `KEYS *` / `GET` on database 0 while real users talk to the bot: they show message texts, names and phones (section 9). Database 15 holds only fake test data.
 Note: only one copy of the bot can poll at a time; a second one gets a `Conflict` error from Telegram. The bot needs no Docker.
 Note: voice notes are saved to `eval/voice/raw/` only from the Telegram user IDs in `VOICE_SAVE_USER_IDS` (`.env`, a JSON list like `[123456789]`; the brackets are required). Your ID = the `chat_id` in the bot's log for your private chat.
@@ -277,9 +285,10 @@ Code (Step 2.3): `app/memory/session_store.py`. Every write (save the session, a
 - Read config from env via `app/config.py`. Never hard-code keys, model names, or URLs.
 - Services (`app/services`) must not import bot code. Keep one responsibility per module.
 - For every LLM/STT call:
-  - set a timeout
-  - retry with backoff on HTTP 429 (free-tier rate limits)
+  - set a timeout per try AND a total deadline for all tries (LLM: 10 s / 20 s, Step 2.4)
+  - retry with backoff + full jitter on 408, 429, 5xx, timeouts and lost connections, never on other 4xx (`app/services/retry.py`, Step 2.4 D3 A)
   - validate with Pydantic
+  - never log, record or put in an error message the text sent or received; numbers and codes only (`LLMUsage`, Step 2.4)
   - on invalid JSON, re-ask once, then fall back to asking the user
 - The classifier always returns a confidence. Set `needs_review` when confidence is below the threshold (threshold is set in Phase 4).
 - Tests: mock the LLM and STT in unit tests, so CI never spends free quota.
@@ -357,7 +366,7 @@ Step-by-step prompts: `docs/prompts/phase1.md` (Steps 1.0–1.12).
 Step-by-step prompts: `docs/prompts/phase2.md` (Steps 2.0–2.13). One branch + one PR per step (section 13, 2026-10-29).
 Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 - 2.2: 7 tables, `compounds` included (Step 1.11 D6 B); the prompt lists 6.
-- 2.4: the prompt retries on 429 + 5xx with jitter; Step 1.6 D8 A retried only on 429 → decide in 2.4.
+- 2.4: the prompt retries on 429 + 5xx with jitter; Step 1.6 D8 A retried only on 429 → decided in 2.4 (D3 A: 408, 429, 5xx, timeouts, lost connections; full jitter; total deadline).
 - 2.5: STT is local faster-whisper `large-v3`, never the Groq API (2026-10-25, D10 A). So no "local backup when Groq fails" question and no 429 retry; the quality signals (`avg_logprob`, `no_speech_prob`) come from faster-whisper itself.
 - 2.7: the prompt trains on synthetic data only; the brief names NYC 311 as the training data, and the data card says "Phase 2 decides" → decide in 2.6/2.7 and tell the instructor.
 - 2.8: phone = E.164, any country (Step 1.11 D1 C), not "+20 → 0".
@@ -370,10 +379,11 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 - [x] AI-written test set (`eval/test_set.csv`): reviewed and frozen (never used for training). Step 2.1: 252 rows, checker 0 problems; frozen as v1 (hash in section 13)
 
 **LLM & Speech**
+- [x] One LLM client for every call (`app/services/llm.py`, Step 2.4): Groq ↔ Gemini by `.env`, strict JSON validated by Pydantic, retries inside a total deadline, numbers per call (no text). Real calls: Groq ✅, Gemini `2.5-flash` ✅, Gemini `3.8-flash` hangs
 - [ ] Write `app/services/stt.py` using self-hosted Whisper (`faster-whisper`)
 - [ ] Create the Pydantic extraction schema and the extraction prompt
 - [ ] Add follow-up questions for missing fields
-- [ ] Validate the output; re-ask once if the JSON is broken
+- [ ] Validate the output; re-ask once if the JSON is broken (Step 2.4 validates and raises `LLMOutputInvalid` with the problems; the re-ask is Step 2.9)
 
 **Backend & Memory**
 - [x] Build the SQLAlchemy models and Alembic migrations (Step 2.2: 7 tables, migration 1, the registry loaded, tests on `srbot_test`)
@@ -450,7 +460,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 **LLM & Speech**
 - [ ] Fix prompt versions; set timeouts and rate-limit retries
 - [ ] Confirm no personal data appears in traces
-- [ ] Re-measure Whisper `large-v3` speed on the server CPU; switch to `medium` if it is too slow (Step 1.6 D10 A)
+- [ ] Re-measure Whisper `large-v3` speed on the server CPU; switch to `medium` if it is too slow (Step 1.6 D10 A). The free VM has 2 Arm OCPUs, not 4: see debt T15
 
 **Backend & Memory**
 - [ ] Switch to webhook mode and add a health-check endpoint
@@ -493,7 +503,7 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 | Date | Decision | Why |
 |---|---|---|
 | 2026-10-23 | Free tool stack instead of Azure / Power BI (Groq or Gemini, Groq Whisper, Metabase OSS, free VM) | No paid services for the prototype |
-| 2026-10-23 | One LLM client behind env vars | Swap Groq ↔ Gemini ↔ Azure OpenAI without code changes |
+| 2026-10-23 | One LLM client behind env vars. **Amended 2026-10-31 (Step 2.4, Momo):** Groq ↔ Gemini by `.env`; Azure OpenAI later (stretch S12) | Swap providers without code changes. Azure needs an account we don't have, so it isn't built or tested |
 | 2026-10-23 | Follow the brief's 10-week timeline (end-to-end demo at week 6) | Brief's Objectives say "demoable in 4 weeks"; timeline says week 6 |
 | 2026-10-24 | Phases split by the brief's 4 roles; I do all 4 roles | Each phase becomes a clear checklist per role |
 | 2026-10-24 | Postgres models, Alembic, and Redis session store moved to Phase 2 | Phase 3 can focus on wiring the full flow |
@@ -610,6 +620,13 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 | 2026-10-31 | **Redis timeouts** (smaller choice 7, Momo's values): connect 2 s, read 1 s. A timeout or a lost connection becomes one clear app error, which Phase 3 turns into a "please try again" reply | Reply target p95 < 5 s (section 11). Local Redis answers in about 1 ms, so 1 s is far above normal, and a message makes about 3 Redis calls: even 3 slow ones stay under 5 s. Momo allowed 1–2 s for reading; 1 s keeps that margin |
 | 2026-10-31 | **Broken session data** (smaller choice 6 + Momo's note): when the JSON in Redis fails validation (broken, or written by an older version of our code), the log gets only the chat ID and the error type, both keys are deleted, and `load()` tells the caller with its own error (not a silent "no session"). **Phase 3:** the bot then tells the user the conversation restarted (section 12, Phase 3) | No crash and no value in the log. A user whose answers vanish without a word would be confused. "No session" (first message, or 30 minutes idle) stays a normal `None` |
 | 2026-10-31 | Names (smaller choice 8, Momo's change): `app/memory/session_store.py` (class `SessionStore`) and `tests/test_session_store.py`, not `session.py` | `app/db/session.py` is SQLAlchemy's database session: one word, one meaning |
+| 2026-10-31 | **One OpenAI-compatible client** (Step 2.4 D1 A): new main dependency `openai>=3.42.0,<4` (Apache-2.0; brings `jiter`, MIT). Groq (`api.groq.com/openai/v1`) and Gemini (`…/v1beta/openai/`) differ only in address + key. The two addresses live in `llm.py`'s provider table; `LLM_BASE_URL` can replace them (smaller choice 3). The `groq` SDK stays in the dev group for `eval/whisper_test.py` | One code path, one error family, one way to read tokens; the brief's Azure OpenAI uses the same client. Cost: Gemini's layer is "beta" (it reports no reasoning tokens, and `gemini-3.8-flash` hung for us). The official SDKs (D1 B) would mean 2–3 adapters |
+| 2026-10-31 | **Strict structured outputs** (D2 A): `complete_json()` sends `json_schema` + `strict: true` and validates the answer with Pydantic again. A schema model must follow the strict rules: `extra="forbid"`, every field required, "missing" = `null` (no defaults); `strict_json_schema()` refuses a model that breaks them before anything is sent | The server guarantees the shape; Pydantic still checks values (a hallucinated "Z-999" has the right shape). Matches the brief ("structured outputs") and design notes §1 ("missing = null"). Only some models support strict (Groq: `gpt-oss-20b/120b`, `qwen3.8-27b`) |
+| 2026-10-31 | **Retries + timeouts** (D3 A + Momo's changes 1 and 10): `app/services/retry.py`, generic (knows nothing about LLMs). Retry 408, 429, 5xx, timeouts, lost connections; never other 4xx. Full jitter: random(0, min(8 s, 1 s × 2^(try−1))); the server's `retry-after` if sent, but > 10 s (e.g. a daily limit) → stop at once; at most 3 tries. **`LLM_TIMEOUT_SECONDS=10` per try, `LLM_TOTAL_TIMEOUT_SECONDS=20` for all tries + waits** (startup check: total ≥ per try). The SDK's own retry is off (`max_retries=0`) | A user never waits more than 20 s, even when every try hangs (seen live with Gemini: stopped at 20.02 s). A day limit won't pass in seconds. Retries visible in the log and tested with a fake clock |
+| 2026-10-31 | **Numbers for every call, never text** (D4 A + D5 B, Momo's change 5): each call returns an `LLMUsage` (time, provider, model, task, outcome, tries, total_ms, latency_ms, input/output/reasoning tokens, finish_reason, http_status, error_code, give_up_reason), writes one log line, and appends one JSON line to `LLM_USAGE_FILE` (`eval/llm_usage/usage.jsonl`, git-ignored; empty = off). `latency_ms` = the try that worked (model speed), `total_ms` = what the user waits. `task` must be a label (`^[a-z0-9_]{1,40}$`), the record forbids extra fields: no text can get in. Failures are recorded too. Cost = tokens × price, computed in Phase 4 | Phase 4 needs latency and cost per request for the ML vs LLM comparison. Message text can hold a name or phone (section 9). The file append is plain (not async): microseconds, like a log line |
+| 2026-10-31 | **Errors** (Momo's change 7): `LLMUnavailable` (no answer after the retries or the deadline; Phase 3 → "please try again"), `LLMRequestRefused` (other 4xx, e.g. 401 `invalid_api_key`, 404 `model_not_found`; never retried), `LLMOutputInvalid` (the answer doesn't fit, is cut off at `max_output_tokens` (`finish_reason=length`) or empty; `problems` = field + kind, never values; Step 2.9 re-asks with it). **Groq's HTTP 400 `json_validate_failed` → `LLMOutputInvalid`, not refused.** Our errors keep the HTTP status and the provider's code (through `safe_code()`: identifier-like, else `"other"`), drop the provider's message, and are raised `from None` | Groq's failed-JSON error body holds the model's answer (`failed_generation`), i.e. the user's data. The code helps debugging and holds no user text. Lesson of debt T11 |
+| 2026-10-31 | Smaller Step 2.4 choices: temperature is a required argument (no default); `max_output_tokens` default 1,024 (thinking tokens count inside it); arguments are checked before anything is sent; `ChatMessage` hides its content when printed and in errors; `list_models()` added for the smoke test (Momo OK). Test model in `.env.example`: `openai/gpt-oss-20b`; the final extraction model is chosen in Step 2.8 | A temperature chosen on purpose per task (0 for extraction, higher for synthetic data). A mistake fails before a paid request |
+| 2026-11-01 | Tests with a **real local socket** for the per-try timeout (a server on 127.0.0.1 that never answers, 0.3 s per try / 0.5 s total); the fake server (`MockTransport`) can't show it. Every timeout bug is checked by breaking the code on purpose (mutation check) | Found while checking the tests: a first version with "< 1.5 s" passed with the deadline timer removed (the call ended 57 ms late). A timing test must not check exact try counts (Windows clock: ~16 ms steps) |
 
 ## 14. Open decisions (decide, then move to the log)
 - Instructor approval for 8 categories (Step 1.8 D5/D6 B). If not approved: move `gas` and `appliances` back into the 6 (`ml/label_mapping.py`, its test, the guide).
@@ -626,6 +643,8 @@ Where a prompt disagrees with section 13, section 13 wins (checked in Step 2.0):
 - Phone check for non-Egyptian numbers (Phase 2, D1 C): add the `phonenumbers` library (new dependency, Apache 2.0) for the real per-country length, or keep the shape check only.
 - How long to keep `messages` of conversations that never became an SR (`/reset`, 30 min idle). Message text is personal data (section 9). Decide before Phase 3 saves messages.
 - Who changes an SR's status, and how: there is no staff screen (technicians are out of scope). Idea: a demo script that closes some SRs with made-up times (Phase 4 or 6); the demo must say they are invented.
+- The LLM models (Step 2.8). Step 2.4 smoke test, one harmless sentence: Groq `openai/gpt-oss-20b` 0.99 s (strict JSON); Gemini `gemini-2.5-flash` 1.8 s (text) / 2.2 s (strict JSON); Gemini `gemini-3.8-flash` **no answer** in 4 tries (10, 9, 60 and 30 s; text and JSON alike), cause unknown (thinking time vs. a hang for the free key). Backup candidate: `gemini-2.5-flash`.
+- How to compare tokens and cost across providers (Phase 4): the same request counted 259 input tokens on Groq (schema + message format included) but 27 on Gemini, and Gemini's compatibility layer reports no reasoning tokens. Groq's `gpt-oss-20b` spent 197 of 228 output tokens thinking (text: 179 of 194). On Groq the JSON schema costs about 166 input tokens per call (259 with it, 93 without).
 
 ---
 
@@ -678,6 +697,13 @@ Format:
 - Status: ✅ pytest 295 passed (28 new in `test_session_store.py`); CI simulation (copy without `.env`): 220 passed + 75 skipped (the 11 Redis tests skip); Redis "off": a clear error, not a hang (2 s); ruff clean. Live: sliding timer back to 1,800,000 ms after a write, a 200 ms key gone by itself, the `?db=0` trap refused by the guard, database 0 untouched by the tests. CHECK rules unchanged after the label move (text compared with migration 1). Committed (2 commits) and pushed: PR #4, CI green on the first push and on the PR (both runs).
 - Known issues / TODO: debts T12 (summaries), T13 (Redis snapshots on disk), T14 (lost update with two fast messages). Phase 3: "please try again" and "conversation restarted" replies (section 12). CI runs no Redis test until Step 2.11.
 - What Momo did: chose D1–D4 and the smaller choices, with changes (timeouts 2 s / 1 s, the `session_store` names, the Phase 3 note, debts T12–T14 in Momo's words); did the `redis-cli` exercise (TTL, sliding, LTRIM, a real session JSON); opened PR #4.
+### Step 2.4 — LLM client (2026-10-31 → 2026-11-01)
+- Phase · role: Phase 2 · LLM & Speech. Branch `step-2.4-llm-client`.
+- Files: see section 5 "Exists since Step 2.4". Changed: `app/config.py` (+ `.env.example`, `tests/test_config.py`), `.gitignore` (`eval/llm_usage/`), `pyproject.toml` + `uv.lock` (`openai`).
+- How it works: `LLMClient` talks to Groq or Gemini through one OpenAI-compatible client; `complete_json()` asks for strict JSON and checks it with Pydantic. `retry_async()` retries short problems with backoff + full jitter: 10 s per try, 20 s in total. Every call returns and records its numbers (log line + JSON line), never the text; failures become 3 clear errors.
+- Status: ✅ pytest with Postgres + Redis (2026-11-01): 379 passed (84 new); CI simulation (copy without `.env`): 304 passed + 75 skipped; ruff clean; `uv sync --locked` OK. 5 bugs added on purpose (mutation checks), all caught. Real calls, one harmless sentence: Groq `gpt-oss-20b` JSON 0.99 s, text 0.93 s; Gemini `2.5-flash` text 1.8 s, JSON 2.2 s; Gemini `3.8-flash` no answer in 4 tries, each stopped on time (20.02 s, 60.0 s, 30.0 s) with `LLMUnavailable`. Committed (2 commits); not pushed yet.
+- Known issues / TODO: debts T15 (Whisper speed on the 2-OCPU VM), T16 (no reasoning-effort control), T17 (usage file: no rotation, needs a volume on the server). Why Gemini 3.8 Flash hangs is unknown; token counts differ by provider (section 14). Step 2.9: the re-ask. Phase 3: Langfuse gets the same numbers.
+- What Momo did: chose D1–D5 (D5 B = Momo's JSON-lines idea) and the smaller choices, with changes (total deadline, Azure later + S12, `finish_reason` + reasoning tokens, status + code kept in errors, `json_validate_failed` → invalid output, retry in its own module, the T15 wording); asked for proof that the timeouts really fired and for a test of it; chose the Gemini diagnosis (D, then A).
 
 ---
 
@@ -697,6 +723,7 @@ Format:
 | S9 | Chart: voice vs text SRs | Needs a `source` column from the first SR; older SRs would have no value | Design notes §3.9 |
 | S10 | `in_progress_at` (D9 B) and a full status history table (D9 C) | Today: `status` + `closed_at` (D9 A) | Design notes §3.9 |
 | S11 | Residents send a photo of the problem | Privacy: photos can show faces and the inside of homes (personal data, section 9), so they need a storage and deletion plan first. Today the bot refuses photos and downloads nothing | Claude (Step 1.12) |
+| S12 | Azure OpenAI as a third LLM provider (the brief's choice) | Azure has an OpenAI-compatible v1 endpoint (`https://<resource>.openai.azure.com/openai/v1/`, used with the normal `OpenAI()` client, no `api_version`). Check then whether it is mostly a third row in `PROVIDERS` + `LLM_BASE_URL` + an `AZURE_OPENAI_API_KEY`, and whether strict structured outputs work there. Needs an Azure account: instructor question | Momo (Step 2.4) |
 
 ---
 
@@ -719,3 +746,6 @@ Each debt has a phase to pay it back. When it is paid, delete the row and say so
 | T12 | The history drops messages older than the last `HISTORY_MAX_MESSAGES`; the brief says older turns are **summarized** (Step 2.3 D3 A) | In a long conversation the LLM no longer sees what was said early on. Smaller than it sounds: the collected fields are kept in the session, not only in the history | Phase 3, with the task "Keep the last N turns and summarize older ones" |
 | T13 | Redis snapshots (`dump.rdb`, on the `redisdata` volume) can keep deleted sessions (with name and phone) on disk for up to ~1 hour (checked live: `save 3600 1 300 100 60 10000`; Step 2.3) | Personal data stays on disk after `/reset`, `/forget`, submit or expiry, until the next snapshot replaces the file | Phase 5: decide whether the server's Redis keeps snapshots at all (likely `--save ""`, since sessions live 30 minutes), and how `/forget` fits with it |
 | T14 | Two fast messages from one chat can overwrite each other's session (**lost update**): aiogram handles updates at the same time, so both load the same session and the second save wins (Step 2.3) | One of the user's answers is lost without a word | Phase 3: process one chat's messages one at a time (per-chat lock). Note: an `asyncio.Lock` only works with one bot process; if Phase 5 runs more than one, use a Redis lock or optimistic locking with `WATCH` |
+| T15 | Local faster-whisper speed on the server. On the laptop, `large-v3` (int8, 4 threads) took 21 s (language set) / 28 s (auto) for a 25 s note (Step 1.6). The Oracle Always Free Arm VM has **2 OCPUs + 12 GB in total** (Oracle page, 2026-10-31), not the 4 cores Step 1.6 assumed (Momo, Step 2.4) | Replies to voice notes may take much longer than on the laptop | Phase 5: measure on the VM, then try in this order: (1) tuned local `large-v3`: int8 + VAD + a smaller beam size (not tested yet: Step 1.6 used beam 5 and no VAD, see S2; re-measure "usable %" too); (2) a smaller model (`medium`); (3) Azure AI Speech (the brief allows it; needs an Azure account: instructor question); (4) Groq (against the brief's "self-hosted" and section 9: needs a section 13 entry and the instructor's OK first) |
+| T16 | No control of the model's thinking (`reasoning_effort`) (Step 2.4, smaller choice 5) | `gpt-oss-20b` spent 197 of 228 output tokens (86%) thinking on one short sentence: slower, more tokens. Thinking counts inside `max_output_tokens` (1,024), so a long thought can cut a JSON answer off (`cut_off`). Gemini 3 models can't turn thinking off, only lower it | Phase 4, with the speed work (p95 < 5 s): an optional per-call setting, measured on the eval set |
+| T17 | `LLM_USAGE_FILE` grows forever (no rotation), and on the server it needs a Docker volume, or it is lost with the container (Step 2.4 D5 B) | ~300 bytes per call (10,000 calls ≈ 3 MB): small, but the numbers could vanish on a redeploy | Phase 5, with the deploy (volume), or drop it if Langfuse (Phase 3) records the same numbers |

@@ -18,6 +18,12 @@ ENV_NAMES = [
     "VOICE_SAVE_USER_IDS",
     "SESSION_TTL_SECONDS",
     "HISTORY_MAX_MESSAGES",
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "LLM_BASE_URL",
+    "LLM_TIMEOUT_SECONDS",
+    "LLM_TOTAL_TIMEOUT_SECONDS",
+    "LLM_USAGE_FILE",
 ]
 
 FAKE_SECRETS = {
@@ -40,9 +46,13 @@ def test_settings_load_without_env_file() -> None:
     settings = Settings(_env_file=None)  # _env_file=None: ignore the real .env
 
     values = settings.model_dump()
-    # Only the two session-memory settings have defaults (Step 2.3); all others are not set
+    # Only the session-memory (Step 2.3) and LLM (Step 2.4) settings below have defaults;
+    # all others are not set
     assert values.pop("session_ttl_seconds") == 1800
     assert values.pop("history_max_messages") == 10
+    assert values.pop("llm_provider") == "groq"
+    assert values.pop("llm_timeout_seconds") == 10.0
+    assert values.pop("llm_total_timeout_seconds") == 20.0
     assert all(value is None for value in values.values())
 
 
@@ -132,4 +142,48 @@ def test_session_memory_settings_must_be_positive(
     monkeypatch.setenv(name, value)
 
     with pytest.raises(ValidationError, match=name.lower()):
+        Settings(_env_file=None)
+
+
+def test_llm_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("LLM_MODEL", "fake-model")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT_SECONDS", "6")
+    monkeypatch.setenv("LLM_USAGE_FILE", "eval/llm_usage/usage.jsonl")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_provider == "gemini"
+    assert settings.llm_model == "fake-model"
+    assert settings.llm_timeout_seconds == 2.5
+    assert settings.llm_total_timeout_seconds == 6.0
+    # A relative path starts at the project root, like STT_MODEL_DIR
+    assert settings.llm_usage_file == ROOT_DIR / "eval" / "llm_usage" / "usage.jsonl"
+
+
+@pytest.mark.parametrize("value", ["azure", "openai", "Groq"])  # not built yet / unknown / case
+def test_llm_provider_must_be_known(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", value)
+
+    with pytest.raises(ValidationError, match="llm_provider"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("name", ["LLM_TIMEOUT_SECONDS", "LLM_TOTAL_TIMEOUT_SECONDS"])
+@pytest.mark.parametrize("value", ["0", "-1", "abc"])
+def test_llm_timeouts_must_be_positive(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match=name.lower()):
+        Settings(_env_file=None)
+
+
+def test_llm_total_timeout_must_cover_one_try(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "10")
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT_SECONDS", "5")
+
+    with pytest.raises(ValidationError, match="LLM_TOTAL_TIMEOUT_SECONDS must be at least"):
         Settings(_env_file=None)
